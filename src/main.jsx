@@ -97,19 +97,23 @@ function Dashboard({ session }) {
   const [sort, setSort] = useState("registered");
   const [collectionLayout, setCollectionLayout] = useState(localStorage.getItem(LAYOUT_KEY) || "list");
   const [selectedCard, setSelectedCard] = useState(null);
+  const [toast, setToast] = useState("");
   const [status, setStatus] = useState("Supabase 동기화");
   const [loading, setLoading] = useState(true);
   const [displayCurrency, setDisplayCurrency] = useState("JPY");
   const [rates, setRates] = useState({ USD: 1, JPY: 157, KRW: 1380, EUR: 0.92 });
   const [themeMode, setThemeMode] = useThemeMode();
   const [scanText, setScanText] = useState("");
+  const [scanLanguage, setScanLanguage] = useState("ja");
   const [scanOverlayOpen, setScanOverlayOpen] = useState(false);
   const [scanCandidates, setScanCandidates] = useState([]);
   const [scanBusy, setScanBusy] = useState(false);
+  const [capturedImage, setCapturedImage] = useState("");
   const [cameraActive, setCameraActive] = useState(false);
   const videoRef = useRef(null);
   const canvasRef = useRef(null);
   const captureRef = useRef(null);
+  const toastTimerRef = useRef(null);
 
   useEffect(() => {
     loadInitialData();
@@ -165,16 +169,25 @@ function Dashboard({ session }) {
     }
   }
 
-  async function handleAddCard(card) {
+  function showToast(message) {
+    setToast(message);
+    clearTimeout(toastTimerRef.current);
+    toastTimerRef.current = setTimeout(() => setToast(""), 2600);
+  }
+
+  async function handleAddCard(card, quantity = 1) {
+    const addQuantity = Math.max(1, Number(quantity || 1));
     setStatus("가격 포함 저장 중");
     try {
-      const detailed = await hydrateCard(card);
+      const detailed = { ...(await hydrateCard(card)), quantity: addQuantity };
       await addCloudCard(user.id, detailed, collection);
       const cards = await reloadCollection();
       await recordPortfolioSnapshot(cards);
-      setStatus(detailed.marketPrice ? "가격 저장됨" : "저장됨");
+      setStatus(`${addQuantity}장 추가됨`);
+      showToast(`${detailed.name} ${addQuantity}장 추가됨`);
     } catch (error) {
       setStatus(error.message);
+      showToast(error.message);
     }
   }
 
@@ -320,6 +333,7 @@ function Dashboard({ session }) {
 
   function handleCapture() {
     const image = captureFrame(videoRef.current, canvasRef.current);
+    setCapturedImage(image);
     if (captureRef.current) {
       captureRef.current.style.background = `center / cover no-repeat url(${image})`;
       captureRef.current.hidden = false;
@@ -334,24 +348,38 @@ function Dashboard({ session }) {
   }
 
   function handleOpenScanner() {
+    setCapturedImage("");
     setScanOverlayOpen(true);
     setStatus("스캔 창 준비");
   }
 
   function handleCloseScanner() {
     handleStopCamera();
+    setCapturedImage("");
     setScanOverlayOpen(false);
+  }
+
+  function handleRetake() {
+    setCapturedImage("");
+    if (captureRef.current) captureRef.current.hidden = true;
+    setStatus("재촬영 준비");
   }
 
   async function handleScanSearch() {
     const trimmed = scanText.trim();
-    if (!trimmed) return;
+    if (!trimmed) {
+      const message = capturedImage ? "이미지 매칭 모델 연결 대기" : "카드명 또는 번호를 입력해 주세요";
+      setStatus(message);
+      showToast(message);
+      return;
+    }
 
     setScanBusy(true);
     setQuery(trimmed);
     setStatus("스캔 후보 검색");
     try {
-      const cards = await searchCards("all", trimmed);
+      const source = scanLanguage === "all" ? "all" : `tcgdex-${scanLanguage}`;
+      const cards = await searchCards(source, trimmed);
       setScanCandidates(cards);
       setResults(cards);
       setStatus(`${cards.length}개 후보`);
@@ -416,7 +444,6 @@ function Dashboard({ session }) {
       <div className="workspace">
         <header className="topbar">
           <div>
-            <p className="eyebrow">Supabase Cloud Portfolio</p>
             <h1>{pageTitle(activeView)}</h1>
           </div>
           <div className="top-actions">
@@ -500,10 +527,13 @@ function Dashboard({ session }) {
               <ScanView
                 scanText={scanText}
                 setScanText={setScanText}
+                scanLanguage={scanLanguage}
+                setScanLanguage={setScanLanguage}
                 cameraActive={cameraActive}
                 overlayOpen={scanOverlayOpen}
                 candidates={scanCandidates}
                 busy={scanBusy}
+                capturedImage={capturedImage}
                 displayCurrency={displayCurrency}
                 rates={rates}
                 videoRef={videoRef}
@@ -513,6 +543,7 @@ function Dashboard({ session }) {
                 onClose={handleCloseScanner}
                 onStart={handleStartCamera}
                 onCapture={handleCapture}
+                onRetake={handleRetake}
                 onStop={handleStopCamera}
                 onSearch={handleScanSearch}
                 onAdd={handleAddCard}
@@ -546,6 +577,8 @@ function Dashboard({ session }) {
           onQuantity={(delta) => handleQuantity(selectedCard, delta)}
         />
       )}
+
+      {toast && <Toast text={toast} />}
     </div>
   );
 }
@@ -776,7 +809,7 @@ function SearchView({ query, setQuery, providerId, setProviderId, results, displ
               card={card}
               displayCurrency={displayCurrency}
               rates={rates}
-              onAdd={() => onAdd(card)}
+              onAdd={(quantity) => onAdd(card, quantity)}
             />
           ))
         ) : (
@@ -788,9 +821,20 @@ function SearchView({ query, setQuery, providerId, setProviderId, results, displ
 }
 
 function SearchCard({ card, displayCurrency, rates, onAdd }) {
+  const [confirming, setConfirming] = useState(false);
+  const [quantity, setQuantity] = useState(1);
+  const [busy, setBusy] = useState(false);
   const price = Number(card.marketPrice || 0)
     ? formatMoney(convertMoney(card.marketPrice, card.currency, displayCurrency, rates), displayCurrency)
     : "";
+
+  async function confirmAdd() {
+    setBusy(true);
+    await onAdd(quantity);
+    setBusy(false);
+    setConfirming(false);
+    setQuantity(1);
+  }
 
   return (
     <article className="result-card">
@@ -800,10 +844,27 @@ function SearchCard({ card, displayCurrency, rates, onAdd }) {
         <p>{compactMeta(card) || card.providerLabel}</p>
         <p>{localizedLine(card)}</p>
         {price && <strong>{price}</strong>}
-        <button className="soft-button" type="button" onClick={onAdd}>
-          <Check size={17} />
-          추가
-        </button>
+        {confirming ? (
+          <div className="add-confirm">
+            <div className="add-stepper" aria-label="추가 수량">
+              <button type="button" onClick={() => setQuantity((value) => Math.max(1, value - 1))}>
+                -
+              </button>
+              <strong>{quantity}</strong>
+              <button type="button" onClick={() => setQuantity((value) => value + 1)}>
+                +
+              </button>
+            </div>
+            <button className="primary-button" type="button" onClick={confirmAdd} disabled={busy}>
+              {busy ? "추가 중" : "확정"}
+            </button>
+          </div>
+        ) : (
+          <button className="soft-button" type="button" onClick={() => setConfirming(true)}>
+            <Check size={17} />
+            추가
+          </button>
+        )}
       </div>
     </article>
   );
@@ -880,24 +941,10 @@ function CollectionView({
 }
 
 function CollectionCard({ card, layout, displayCurrency, rates, onPatch, onQuantity, onOpen }) {
-  const [draftPrice, setDraftPrice] = useState(String(Number(card.marketPrice || 0)));
-  const saveTimer = useRef(null);
   const subtotal = Number(card.marketPrice || 0) * Number(card.quantity || 0);
   const displaySubtotal = convertMoney(subtotal, card.currency, displayCurrency, rates);
   const unitDisplay = convertMoney(card.marketPrice, card.currency, displayCurrency, rates);
   const change = cardChange(card, displayCurrency, rates);
-
-  useEffect(() => {
-    setDraftPrice(String(Number(card.marketPrice || 0)));
-  }, [card.marketPrice]);
-
-  function handlePriceInput(value) {
-    setDraftPrice(value);
-    clearTimeout(saveTimer.current);
-    saveTimer.current = setTimeout(() => {
-      onPatch({ marketPrice: Number(value || 0) });
-    }, 550);
-  }
 
   return (
     <article className={`collection-card ${layout === "grid" ? "grid" : "list"}`}>
@@ -928,8 +975,8 @@ function CollectionCard({ card, layout, displayCurrency, rates, onPatch, onQuant
               </button>
             </div>
             <div className="value-box">
-              <strong>{subtotal ? formatMoney(displaySubtotal, displayCurrency) : "가격 미입력"}</strong>
-              <span>{card.marketPrice ? `${formatMoney(unitDisplay, displayCurrency)} / 장` : "가격 없음"}</span>
+              <strong>{subtotal ? formatMoney(displaySubtotal, displayCurrency) : "가격 정보 없음"}</strong>
+              <span>{card.marketPrice ? `${formatMoney(unitDisplay, displayCurrency)} / 장` : "가격 조회 대기"}</span>
             </div>
           </div>
         </div>
@@ -954,20 +1001,6 @@ function CollectionCard({ card, layout, displayCurrency, rates, onPatch, onQuant
                 </option>
               ))}
             </select>
-          </label>
-          <label>
-            <span>원통화</span>
-            <select value={card.currency || "JPY"} onChange={(event) => onPatch({ currency: event.target.value })}>
-              {["JPY", "KRW", "USD", "EUR"].map((value) => (
-                <option key={value} value={value}>
-                  {value}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label>
-            <span>원가격</span>
-            <input type="number" inputMode="decimal" min="0" step="0.01" value={draftPrice} onChange={(event) => handlePriceInput(event.target.value)} />
           </label>
         </div>
 
@@ -1046,7 +1079,7 @@ function CardDetailModal({ card, displayCurrency, rates, onClose, onPatch, onQua
 
           <div className="detail-value-panel">
             <span>총 평가액</span>
-            <strong>{subtotal ? formatMoney(displaySubtotal, displayCurrency) : "가격 미입력"}</strong>
+            <strong>{subtotal ? formatMoney(displaySubtotal, displayCurrency) : "가격 정보 없음"}</strong>
             <small>{card.marketPrice ? `${formatMoney(unitDisplay, displayCurrency)} / 장 · ${card.quantity}장 보유` : `${card.quantity}장 보유`}</small>
             <ChangePill change={change} currency={displayCurrency} />
           </div>
@@ -1086,10 +1119,13 @@ function CardDetailModal({ card, displayCurrency, rates, onClose, onPatch, onQua
 function ScanView({
   scanText,
   setScanText,
+  scanLanguage,
+  setScanLanguage,
   cameraActive,
   overlayOpen,
   candidates,
   busy,
+  capturedImage,
   displayCurrency,
   rates,
   videoRef,
@@ -1099,6 +1135,7 @@ function ScanView({
   onClose,
   onStart,
   onCapture,
+  onRetake,
   onStop,
   onSearch,
   onAdd,
@@ -1127,9 +1164,12 @@ function ScanView({
         <ScannerOverlay
           scanText={scanText}
           setScanText={setScanText}
+          scanLanguage={scanLanguage}
+          setScanLanguage={setScanLanguage}
           cameraActive={cameraActive}
           candidates={candidates}
           busy={busy}
+          capturedImage={capturedImage}
           displayCurrency={displayCurrency}
           rates={rates}
           videoRef={videoRef}
@@ -1138,6 +1178,7 @@ function ScanView({
           onClose={onClose}
           onStart={onStart}
           onCapture={onCapture}
+          onRetake={onRetake}
           onStop={onStop}
           onSearch={onSearch}
           onAdd={onAdd}
@@ -1150,9 +1191,12 @@ function ScanView({
 function ScannerOverlay({
   scanText,
   setScanText,
+  scanLanguage,
+  setScanLanguage,
   cameraActive,
   candidates,
   busy,
+  capturedImage,
   displayCurrency,
   rates,
   videoRef,
@@ -1161,6 +1205,7 @@ function ScannerOverlay({
   onClose,
   onStart,
   onCapture,
+  onRetake,
   onStop,
   onSearch,
   onAdd,
@@ -1195,15 +1240,24 @@ function ScannerOverlay({
 
       <div className="scanner-bottom-sheet">
         <div className="scan-command-row">
+          <label className="scan-input scan-language">
+            <span>언어</span>
+            <select value={scanLanguage} onChange={(event) => setScanLanguage(event.target.value)}>
+              <option value="ja">일본판</option>
+              <option value="ko">한국판</option>
+              <option value="en">영문판</option>
+              <option value="all">전체</option>
+            </select>
+          </label>
           <label className="scan-input">
             <span>인식 텍스트</span>
             <input value={scanText} onChange={(event) => setScanText(event.target.value)} placeholder="카드명 또는 번호" />
           </label>
-          <button className="soft-button" type="button" onClick={onCapture} disabled={!cameraActive}>
-            촬영
+          <button className="soft-button" type="button" onClick={capturedImage ? onRetake : onCapture} disabled={!cameraActive}>
+            {capturedImage ? "다시 촬영" : "촬영"}
           </button>
-          <button className="primary-button" type="button" onClick={onSearch} disabled={busy || !scanText.trim()}>
-            {busy ? "검색 중" : "후보 검색"}
+          <button className="primary-button" type="button" onClick={onSearch} disabled={busy}>
+            {busy ? "검색 중" : "텍스트 검색"}
           </button>
         </div>
 
@@ -1451,6 +1505,15 @@ function StatusPill({ text }) {
   );
 }
 
+function Toast({ text }) {
+  return (
+    <div className="toast" role="status" aria-live="polite">
+      <Check size={17} />
+      {text}
+    </div>
+  );
+}
+
 function Splash({ compact }) {
   return (
     <div className={compact ? "splash compact" : "splash"}>
@@ -1598,7 +1661,7 @@ function preferredKoreanName(card) {
 }
 
 function priceSourceLabel(card) {
-  if (!Number(card.marketPrice || 0)) return "가격 미입력";
+  if (!Number(card.marketPrice || 0)) return "가격 정보 없음";
   const source =
     card.priceSource === "tcgplayer"
       ? "TCGplayer"
@@ -1670,6 +1733,11 @@ createRoot(document.getElementById("root")).render(
 registerServiceWorker();
 
 function registerServiceWorker() {
+  if (import.meta.env.DEV) {
+    navigator.serviceWorker?.getRegistrations?.().then((registrations) => registrations.forEach((registration) => registration.unregister()));
+    return;
+  }
+
   if (!("serviceWorker" in navigator)) return;
 
   window.addEventListener("load", () => {
