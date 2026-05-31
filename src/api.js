@@ -301,10 +301,21 @@ function pickPokemonTcgPrice(card) {
     }
   }
 
-  const cardmarket = card.cardmarket?.prices;
-  if (cardmarket?.averageSellPrice) {
+  const cardmarket = card.cardmarket?.prices || {};
+  const cardmarketValue =
+    cardmarket.averageSellPrice ||
+    cardmarket.trendPrice ||
+    cardmarket.avg30 ||
+    cardmarket.avg7 ||
+    cardmarket.avg1 ||
+    cardmarket.lowPrice ||
+    cardmarket.reverseHoloTrend ||
+    cardmarket.reverseHoloSell ||
+    cardmarket.reverseHoloLow;
+
+  if (cardmarketValue) {
     return {
-      value: Number(cardmarket.averageSellPrice),
+      value: Number(cardmarketValue),
       currency: "EUR",
       source: "cardmarket",
       finish: "normal",

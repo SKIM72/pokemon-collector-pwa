@@ -94,6 +94,8 @@ function Dashboard({ session }) {
   const [results, setResults] = useState([]);
   const [query, setQuery] = useState("");
   const [providerId, setProviderId] = useState("all");
+  const [searching, setSearching] = useState(false);
+  const [refreshingPrices, setRefreshingPrices] = useState(false);
   const [sort, setSort] = useState("registered");
   const [collectionLayout, setCollectionLayout] = useState(localStorage.getItem(LAYOUT_KEY) || "list");
   const [selectedCard, setSelectedCard] = useState(null);
@@ -158,6 +160,7 @@ function Dashboard({ session }) {
     if (!trimmed) return;
 
     setStatus("전체 언어 검색 중");
+    setSearching(true);
     setResults([]);
     try {
       const cards = await searchCards(providerId, trimmed);
@@ -166,6 +169,8 @@ function Dashboard({ session }) {
     } catch (error) {
       setStatus("검색 실패");
       setResults([]);
+    } finally {
+      setSearching(false);
     }
   }
 
@@ -198,6 +203,7 @@ function Dashboard({ session }) {
     }
 
     setStatus("가격 갱신 시작");
+    setRefreshingPrices(true);
     try {
       const ratePayload = await loadCurrencyRates();
       setRates(ratePayload.rates);
@@ -218,6 +224,8 @@ function Dashboard({ session }) {
       setStatus("가격 갱신 완료");
     } catch (error) {
       setStatus(error.message);
+    } finally {
+      setRefreshingPrices(false);
     }
   }
 
@@ -423,6 +431,7 @@ function Dashboard({ session }) {
                 className={activeView === item.id ? "nav-item active" : "nav-item"}
                 key={item.id}
                 type="button"
+                aria-label={item.label}
                 onClick={() => setActiveView(item.id)}
               >
                 <Icon size={18} />
@@ -480,6 +489,7 @@ function Dashboard({ session }) {
                 results={results}
                 displayCurrency={displayCurrency}
                 rates={rates}
+                searching={searching}
                 onSearch={handleSearch}
                 onAdd={handleAddCard}
               />
@@ -496,6 +506,7 @@ function Dashboard({ session }) {
                 setLayout={setCollectionLayout}
                 displayCurrency={displayCurrency}
                 rates={rates}
+                refreshing={refreshingPrices}
                 onRefreshPrices={handleRefreshPrices}
                 onPatch={handleCardPatch}
                 onQuantity={handleQuantity}
@@ -514,6 +525,7 @@ function Dashboard({ session }) {
                 setLayout={setCollectionLayout}
                 displayCurrency={displayCurrency}
                 rates={rates}
+                refreshing={refreshingPrices}
                 onRefreshPrices={handleRefreshPrices}
                 onPatch={handleCardPatch}
                 onQuantity={handleQuantity}
@@ -771,7 +783,7 @@ function PasswordRecoveryScreen({ onDone }) {
   );
 }
 
-function SearchView({ query, setQuery, providerId, setProviderId, results, displayCurrency, rates, onSearch, onAdd }) {
+function SearchView({ query, setQuery, providerId, setProviderId, results, displayCurrency, rates, searching, onSearch, onAdd }) {
   return (
     <section className="content-grid">
       <div className="glass-panel search-panel">
@@ -795,8 +807,9 @@ function SearchView({ query, setQuery, providerId, setProviderId, results, displ
               placeholder="리자몽, リザードン, Charizard, 205/172"
             />
           </div>
-          <button className="primary-button" type="submit">
-            검색
+          <button className={searching ? "primary-button is-loading" : "primary-button"} type="submit" disabled={searching}>
+            {searching && <span className="button-spinner" />}
+            {searching ? "검색 중" : "검색"}
           </button>
         </form>
       </div>
@@ -830,10 +843,13 @@ function SearchCard({ card, displayCurrency, rates, onAdd }) {
 
   async function confirmAdd() {
     setBusy(true);
-    await onAdd(quantity);
-    setBusy(false);
-    setConfirming(false);
-    setQuantity(1);
+    try {
+      await onAdd(quantity);
+      setConfirming(false);
+      setQuantity(1);
+    } finally {
+      setBusy(false);
+    }
   }
 
   return (
@@ -844,27 +860,30 @@ function SearchCard({ card, displayCurrency, rates, onAdd }) {
         <p>{compactMeta(card) || card.providerLabel}</p>
         <p>{localizedLine(card)}</p>
         {price && <strong>{price}</strong>}
-        {confirming ? (
-          <div className="add-confirm">
-            <div className="add-stepper" aria-label="추가 수량">
-              <button type="button" onClick={() => setQuantity((value) => Math.max(1, value - 1))}>
-                -
-              </button>
-              <strong>{quantity}</strong>
-              <button type="button" onClick={() => setQuantity((value) => value + 1)}>
-                +
+        <div className="result-action-slot">
+          {confirming ? (
+            <div className="add-confirm">
+              <div className="add-stepper" aria-label="추가 수량">
+                <button type="button" onClick={() => setQuantity((value) => Math.max(1, value - 1))}>
+                  -
+                </button>
+                <strong>{quantity}</strong>
+                <button type="button" onClick={() => setQuantity((value) => value + 1)}>
+                  +
+                </button>
+              </div>
+              <button className={busy ? "primary-button is-loading" : "primary-button"} type="button" onClick={confirmAdd} disabled={busy}>
+                {busy && <span className="button-spinner" />}
+                {busy ? "추가 중" : "확정"}
               </button>
             </div>
-            <button className="primary-button" type="button" onClick={confirmAdd} disabled={busy}>
-              {busy ? "추가 중" : "확정"}
+          ) : (
+            <button className="soft-button" type="button" onClick={() => setConfirming(true)}>
+              <Check size={17} />
+              추가
             </button>
-          </div>
-        ) : (
-          <button className="soft-button" type="button" onClick={() => setConfirming(true)}>
-            <Check size={17} />
-            추가
-          </button>
-        )}
+          )}
+        </div>
       </div>
     </article>
   );
@@ -880,6 +899,7 @@ function CollectionView({
   setLayout,
   displayCurrency,
   rates,
+  refreshing,
   onRefreshPrices,
   onPatch,
   onQuantity,
@@ -906,9 +926,9 @@ function CollectionView({
               리스트
             </button>
           </div>
-          <button className="primary-button" type="button" onClick={onRefreshPrices}>
-            <RefreshCw size={18} />
-            가격 새로고침
+          <button className={refreshing ? "primary-button is-loading" : "primary-button"} type="button" onClick={onRefreshPrices} disabled={refreshing}>
+            {refreshing ? <span className="button-spinner" /> : <RefreshCw size={18} />}
+            {refreshing ? "새로고침 중" : "가격 새로고침"}
           </button>
           <select value={sort} onChange={(event) => setSort(event.target.value)} aria-label="정렬">
             <option value="registered">등록순</option>
@@ -941,10 +961,26 @@ function CollectionView({
 }
 
 function CollectionCard({ card, layout, displayCurrency, rates, onPatch, onQuantity, onOpen }) {
+  const [draftQuantity, setDraftQuantity] = useState(Number(card.quantity || 0));
+  const [savingQuantity, setSavingQuantity] = useState(false);
   const subtotal = Number(card.marketPrice || 0) * Number(card.quantity || 0);
   const displaySubtotal = convertMoney(subtotal, card.currency, displayCurrency, rates);
   const unitDisplay = convertMoney(card.marketPrice, card.currency, displayCurrency, rates);
   const change = cardChange(card, displayCurrency, rates);
+  const quantityChanged = draftQuantity !== Number(card.quantity || 0);
+
+  useEffect(() => {
+    setDraftQuantity(Number(card.quantity || 0));
+  }, [card.quantity]);
+
+  async function saveQuantity() {
+    setSavingQuantity(true);
+    try {
+      await onQuantity(draftQuantity - Number(card.quantity || 0));
+    } finally {
+      setSavingQuantity(false);
+    }
+  }
 
   return (
     <article className={`collection-card ${layout === "grid" ? "grid" : "list"}`}>
@@ -1012,12 +1048,16 @@ function CollectionCard({ card, layout, displayCurrency, rates, onPatch, onQuant
       </div>
 
       <div className="quantity-rail">
-        <button type="button" onClick={() => onQuantity(1)}>
+        <button type="button" onClick={() => setDraftQuantity((value) => value + 1)}>
           +
         </button>
-        <strong>{card.quantity}</strong>
-        <button type="button" onClick={() => onQuantity(-1)}>
+        <strong>{draftQuantity}</strong>
+        <button type="button" onClick={() => setDraftQuantity((value) => Math.max(0, value - 1))}>
           -
+        </button>
+        <button className={savingQuantity ? "quantity-save is-loading" : "quantity-save"} type="button" onClick={saveQuantity} disabled={!quantityChanged || savingQuantity}>
+          {savingQuantity && <span className="button-spinner" />}
+          {savingQuantity ? "저장 중" : "저장"}
         </button>
       </div>
     </article>
@@ -1025,10 +1065,13 @@ function CollectionCard({ card, layout, displayCurrency, rates, onPatch, onQuant
 }
 
 function CardDetailModal({ card, displayCurrency, rates, onClose, onPatch, onQuantity }) {
+  const [draftQuantity, setDraftQuantity] = useState(Number(card.quantity || 0));
+  const [savingQuantity, setSavingQuantity] = useState(false);
   const subtotal = Number(card.marketPrice || 0) * Number(card.quantity || 0);
   const displaySubtotal = convertMoney(subtotal, card.currency, displayCurrency, rates);
   const unitDisplay = convertMoney(card.marketPrice, card.currency, displayCurrency, rates);
   const change = cardChange(card, displayCurrency, rates);
+  const quantityChanged = draftQuantity !== Number(card.quantity || 0);
   const details = [
     ["세트", card.setName || "-"],
     ["번호", card.number || "-"],
@@ -1048,6 +1091,19 @@ function CardDetailModal({ card, displayCurrency, rates, onClose, onPatch, onQua
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [onClose]);
+
+  useEffect(() => {
+    setDraftQuantity(Number(card.quantity || 0));
+  }, [card.quantity]);
+
+  async function saveQuantity() {
+    setSavingQuantity(true);
+    try {
+      await onQuantity(draftQuantity - Number(card.quantity || 0));
+    } finally {
+      setSavingQuantity(false);
+    }
+  }
 
   return (
     <div className="modal-backdrop" role="presentation" onClick={onClose}>
@@ -1102,12 +1158,16 @@ function CardDetailModal({ card, displayCurrency, rates, onClose, onPatch, onQua
           </div>
 
           <div className="modal-actions">
-            <button className="soft-button" type="button" onClick={() => onQuantity(-1)}>
+            <button className="soft-button" type="button" onClick={() => setDraftQuantity((value) => Math.max(0, value - 1))}>
               -1
             </button>
-            <strong>{card.quantity}장 보유</strong>
-            <button className="primary-button" type="button" onClick={() => onQuantity(1)}>
+            <strong>{draftQuantity}장 보유</strong>
+            <button className="soft-button" type="button" onClick={() => setDraftQuantity((value) => value + 1)}>
               +1
+            </button>
+            <button className={savingQuantity ? "primary-button is-loading" : "primary-button"} type="button" onClick={saveQuantity} disabled={!quantityChanged || savingQuantity}>
+              {savingQuantity && <span className="button-spinner" />}
+              {savingQuantity ? "저장 중" : "수량 저장"}
             </button>
           </div>
         </div>
@@ -1256,7 +1316,8 @@ function ScannerOverlay({
           <button className="soft-button" type="button" onClick={capturedImage ? onRetake : onCapture} disabled={!cameraActive}>
             {capturedImage ? "다시 촬영" : "촬영"}
           </button>
-          <button className="primary-button" type="button" onClick={onSearch} disabled={busy}>
+          <button className={busy ? "primary-button is-loading" : "primary-button"} type="button" onClick={onSearch} disabled={busy}>
+            {busy && <span className="button-spinner" />}
             {busy ? "검색 중" : "텍스트 검색"}
           </button>
         </div>

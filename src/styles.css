@@ -61,6 +61,25 @@ input {
 button {
   border: 0;
   cursor: pointer;
+  transition:
+    background-color 160ms ease,
+    box-shadow 160ms ease,
+    color 160ms ease,
+    filter 160ms ease,
+    opacity 160ms ease,
+    transform 140ms ease;
+}
+
+button:disabled {
+  cursor: not-allowed;
+}
+
+button:not(:disabled):hover {
+  filter: brightness(1.03);
+}
+
+button:not(:disabled):active {
+  transform: translateY(0) scale(0.98);
 }
 
 input,
@@ -365,6 +384,55 @@ button:focus-visible {
   justify-content: center;
   min-height: 46px;
   padding: 0 16px;
+  transition:
+    background-color 160ms ease,
+    box-shadow 160ms ease,
+    color 160ms ease,
+    opacity 160ms ease,
+    transform 140ms ease;
+}
+
+.primary-button:not(:disabled):hover,
+.soft-button:not(:disabled):hover,
+.danger-button:not(:disabled):hover,
+.file-button:not(:disabled):hover,
+.icon-button:not(:disabled):hover,
+.favorite-button:not(:disabled):hover,
+.nav-item:not(:disabled):hover,
+.theme-button:not(:disabled):hover,
+.layout-toggle button:not(:disabled):hover,
+.quantity-rail button:not(:disabled):hover,
+.add-stepper button:not(:disabled):hover {
+  transform: translateY(-1px);
+}
+
+.primary-button:not(:disabled):active,
+.soft-button:not(:disabled):active,
+.danger-button:not(:disabled):active,
+.file-button:not(:disabled):active,
+.icon-button:not(:disabled):active,
+.favorite-button:not(:disabled):active,
+.nav-item:not(:disabled):active,
+.theme-button:not(:disabled):active,
+.layout-toggle button:not(:disabled):active,
+.quantity-rail button:not(:disabled):active,
+.add-stepper button:not(:disabled):active {
+  transform: translateY(0) scale(0.98);
+}
+
+.button-spinner {
+  animation: spin 0.8s linear infinite;
+  border: 2px solid currentColor;
+  border-radius: 999px;
+  border-right-color: transparent;
+  height: 16px;
+  width: 16px;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .primary-button {
@@ -518,7 +586,16 @@ button:focus-visible {
   align-content: start;
   display: grid;
   gap: 8px;
+  height: 282px;
+  overflow: hidden;
   padding: 14px;
+}
+
+.result-action-slot {
+  align-content: end;
+  display: grid;
+  margin-top: auto;
+  min-height: 98px;
 }
 
 .add-confirm {
@@ -554,6 +631,25 @@ button:focus-visible {
   margin: 0;
 }
 
+.result-body h3,
+.result-body p {
+  -webkit-box-orient: vertical;
+  display: -webkit-box;
+  overflow: hidden;
+}
+
+.result-body h3 {
+  -webkit-line-clamp: 2;
+}
+
+.result-body p {
+  -webkit-line-clamp: 2;
+}
+
+.result-body p:first-of-type {
+  -webkit-line-clamp: 1;
+}
+
 .result-body p,
 .collection-info p {
   color: var(--muted);
@@ -586,6 +682,11 @@ button:focus-visible {
 
 .collection-card.list {
   align-items: start;
+  grid-template-columns: 116px minmax(0, 1fr);
+}
+
+.collection-card.list .collection-info {
+  display: contents;
 }
 
 .collection-thumb {
@@ -641,6 +742,11 @@ button:focus-visible {
   align-items: flex-start;
   justify-content: space-between;
   gap: 14px;
+}
+
+.collection-card.list .collection-title-row {
+  grid-column: 2 / 3;
+  padding-top: 6px;
 }
 
 .collection-card.grid .collection-title-row {
@@ -705,6 +811,11 @@ button:focus-visible {
 }
 
 .collection-card.grid .card-controls {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.collection-card.list .card-controls {
+  grid-column: 1 / -1;
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
@@ -791,11 +902,15 @@ button:focus-visible {
   background: var(--surface-muted);
   border-radius: 22px;
   display: grid;
+  gap: 8px;
+  grid-template-columns: 42px 1fr 42px;
   justify-items: center;
   padding: 6px;
 }
 
-.collection-card.grid .quantity-rail {
+.collection-card.grid .quantity-rail,
+.collection-card.list .quantity-rail {
+  grid-column: 1 / -1;
   grid-template-columns: 1fr auto 1fr;
 }
 
@@ -804,6 +919,22 @@ button:focus-visible {
   color: var(--ink);
   height: 38px;
   width: 38px;
+}
+
+.quantity-rail .quantity-save {
+  align-items: center;
+  background: var(--accent);
+  color: var(--bg);
+  display: inline-flex;
+  gap: 8px;
+  justify-content: center;
+  grid-column: 1 / -1;
+  width: 100%;
+}
+
+.quantity-rail .quantity-save:disabled {
+  background: var(--surface-solid);
+  color: var(--muted);
 }
 
 .scan-page {
