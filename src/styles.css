@@ -583,19 +583,18 @@ button:focus-visible {
 }
 
 .result-body {
-  align-content: start;
-  display: grid;
+  display: flex;
+  flex-direction: column;
   gap: 8px;
-  height: 282px;
-  overflow: hidden;
+  min-height: 224px;
   padding: 14px;
 }
 
 .result-action-slot {
-  align-content: end;
   display: grid;
+  flex: 0 0 98px;
   margin-top: auto;
-  min-height: 98px;
+  place-items: end stretch;
 }
 
 .add-confirm {
