@@ -51,6 +51,7 @@ export async function loadCloudCollection(userId) {
 }
 
 export async function addCloudCard(userId, card, collection) {
+  const hasNewPrice = Number(card.marketPrice || 0) > 0;
   const existing = collection.find(
     (item) =>
       item.source === card.source &&
@@ -63,14 +64,14 @@ export async function addCloudCard(userId, card, collection) {
   if (existing) {
     const updated = await updateCloudCard(userId, existing.uid, {
       quantity: Number(existing.quantity || 0) + Number(card.quantity || 1),
-      marketPrice: Number(card.marketPrice || existing.marketPrice || 0),
-      currency: card.currency || existing.currency,
-      priceSource: card.priceSource || existing.priceSource,
-      priceFinish: card.priceFinish || existing.priceFinish,
-      marketReferenceId: card.marketReferenceId || existing.marketReferenceId,
-      marketReferenceName: card.marketReferenceName || existing.marketReferenceName,
-      marketUpdatedAt: card.updatedAtMarket || existing.updatedAtMarket,
-      lastPriceSyncAt: card.marketPrice ? new Date().toISOString() : existing.lastPriceSyncAt,
+      marketPrice: hasNewPrice ? Number(card.marketPrice || 0) : Number(existing.marketPrice || 0),
+      currency: hasNewPrice ? card.currency || existing.currency : existing.currency,
+      priceSource: hasNewPrice ? card.priceSource || existing.priceSource : existing.priceSource,
+      priceFinish: hasNewPrice ? card.priceFinish || existing.priceFinish : existing.priceFinish,
+      marketReferenceId: hasNewPrice ? card.marketReferenceId || existing.marketReferenceId : existing.marketReferenceId,
+      marketReferenceName: hasNewPrice ? card.marketReferenceName || existing.marketReferenceName : existing.marketReferenceName,
+      marketUpdatedAt: hasNewPrice ? card.updatedAtMarket || existing.updatedAtMarket : existing.updatedAtMarket,
+      lastPriceSyncAt: hasNewPrice ? new Date().toISOString() : existing.lastPriceSyncAt,
     });
     return updated;
   }

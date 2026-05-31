@@ -36,6 +36,7 @@ jobs:
         env:
           VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
           VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
+          VITE_PRICE_EDGE_FUNCTION: ${{ secrets.VITE_PRICE_EDGE_FUNCTION || vars.VITE_PRICE_EDGE_FUNCTION }}
 
       - name: Configure Pages
         uses: actions/configure-pages@v5

@@ -1,7 +1,9 @@
 import { expandQueryAliases, getAliasLocalizations } from "./aliases.js";
+import { hasSupabaseConfig, supabase } from "./supabaseClient.js";
 
 const POKEMON_TCG_API = "https://api.pokemontcg.io/v2/cards";
 const TCGDEX_API = "https://api.tcgdex.net/v2";
+const PRICE_EDGE_FUNCTION = import.meta.env.VITE_PRICE_EDGE_FUNCTION || "";
 
 const LANGUAGES = [
   { id: "ja", label: "일본어", defaultCurrency: "JPY" },
@@ -196,16 +198,50 @@ async function searchPokemonTcg(query, provider) {
 }
 
 async function lookupMarketPrice(card) {
-  const englishName = card.englishName || card.localizedNames?.en || (hasLatin(card.name) ? card.name : "");
-  if (!englishName) return noPrice("no-english-name");
+  const localPrice = await lookupLocalMarketPrice(card).catch(() => null);
+  if (isPricePayload(localPrice)) return localPrice;
 
-  const candidates = await searchPokemonTcg(englishName, getProvider("pokemontcg-en")).catch(() => []);
+  return lookupPokemonTcgFallbackPrice(card);
+}
+
+async function lookupLocalMarketPrice(card) {
+  const source = localMarketSource(card.language);
+  if (!source || !PRICE_EDGE_FUNCTION || !hasSupabaseConfig || !supabase?.functions) return null;
+
+  const { data, error } = await supabase.functions.invoke(PRICE_EDGE_FUNCTION, {
+    body: {
+      source,
+      language: card.language,
+      card: {
+        id: card.id,
+        name: card.name,
+        localizedNames: card.localizedNames || {},
+        englishName: card.englishName || "",
+        setId: card.setId || "",
+        setName: card.setName || "",
+        number: card.number || "",
+        rarity: card.rarity || "",
+        finish: card.finish || "normal",
+        condition: card.condition || "NM",
+      },
+    },
+  });
+
+  if (error) return null;
+  return normalizeLocalPrice(data, source, card);
+}
+
+async function lookupPokemonTcgFallbackPrice(card) {
+  const englishName = card.englishName || card.localizedNames?.en || (hasLatin(card.name) ? card.name : "");
+  if (!englishName) return noPrice("pokemon-tcg-no-english-name");
+
+  const candidates = await searchPokemonTcgCandidates(englishName, card);
   const priced = candidates
-    .map((candidate) => ({ candidate, price: pickPokemonTcgPrice(candidate.raw) }))
+    .map((candidate) => ({ candidate, price: pickPokemonTcgPrice(candidate.raw, card.finish) }))
     .filter(({ price }) => Number(price.value || 0) > 0)
     .sort((a, b) => scorePriceCandidate(b.candidate, card) - scorePriceCandidate(a.candidate, card));
 
-  if (!priced.length) return noPrice("no-market-price");
+  if (!priced.length) return noPrice("pokemon-tcg-no-market-price");
 
   const { candidate, price } = priced[0];
   return {
@@ -215,8 +251,36 @@ async function lookupMarketPrice(card) {
     priceFinish: price.finish,
     marketReferenceId: candidate.id,
     marketReferenceName: candidate.name,
+    marketReferenceProvider: "pokemontcg",
     updatedAtMarket: candidate.updatedAtMarket,
   };
+}
+
+async function searchPokemonTcgCandidates(englishName, card) {
+  const searches = [
+    card.number ? searchPokemonTcgByNameAndNumber(englishName, card.number) : Promise.resolve([]),
+    searchPokemonTcg(englishName, getProvider("pokemontcg-en")),
+    card.marketReferenceName
+      ? searchPokemonTcg(card.marketReferenceName, getProvider("pokemontcg-en"))
+      : Promise.resolve([]),
+  ];
+
+  const results = await Promise.all(searches.map((search) => search.catch(() => [])));
+
+  return dedupeCards(results.flat()).slice(0, 48);
+}
+
+async function searchPokemonTcgByNameAndNumber(name, number) {
+  const url = new URL(POKEMON_TCG_API);
+  url.searchParams.set("q", `name:${pokemonQueryValue(name)}* number:${pokemonQueryValue(number)}`);
+  url.searchParams.set("pageSize", "24");
+  url.searchParams.set("orderBy", "-set.releaseDate");
+
+  const response = await fetch(url);
+  if (!response.ok) throw new Error("Pokemon TCG API 검색에 실패했습니다.");
+
+  const payload = await response.json();
+  return payload.data.map((card) => normalizePokemonTcgCard(card, getProvider("pokemontcg-en")));
 }
 
 function normalizeTcgDexCard(card, language, detailed, localizations = {}) {
@@ -285,9 +349,9 @@ function normalizePokemonTcgCard(card, provider) {
   };
 }
 
-function pickPokemonTcgPrice(card) {
+function pickPokemonTcgPrice(card, preferredFinish = "") {
   const tcgPlayerPrices = card.tcgplayer?.prices || {};
-  const order = ["holofoil", "reverseHolofoil", "normal", "1stEditionHolofoil", "unlimitedHolofoil"];
+  const order = priceFinishOrder(preferredFinish);
 
   for (const key of order) {
     const price = tcgPlayerPrices[key]?.market || tcgPlayerPrices[key]?.mid;
@@ -348,12 +412,52 @@ function noPrice(source) {
   };
 }
 
+function normalizeLocalPrice(data, source, card) {
+  const payload = data?.price ? data.price : data;
+  const price = Number(payload?.marketPrice || payload?.price || payload?.value || 0);
+  if (!price) return null;
+
+  const currency = payload.currency || (source === "tcgbox" ? "KRW" : "JPY");
+  return {
+    marketPrice: price,
+    currency,
+    priceSource: payload.priceSource || payload.source || source,
+    priceFinish: payload.priceFinish || payload.finish || card.finish || "normal",
+    marketReferenceId: payload.marketReferenceId || payload.referenceId || payload.url || card.id,
+    marketReferenceName: payload.marketReferenceName || payload.referenceName || card.name,
+    marketReferenceUrl: payload.marketReferenceUrl || payload.url || "",
+    updatedAtMarket: payload.updatedAtMarket || payload.updatedAt || new Date().toISOString(),
+  };
+}
+
+function isPricePayload(payload) {
+  return Number(payload?.marketPrice || 0) > 0;
+}
+
+function localMarketSource(language) {
+  if (language === "ja") return "yuyutei";
+  if (language === "ko") return "tcgbox";
+  return "";
+}
+
+function priceFinishOrder(preferredFinish = "") {
+  const normalized = String(preferredFinish || "").toLowerCase();
+  if (normalized.includes("reverse")) {
+    return ["reverseHolofoil", "holofoil", "normal", "1stEditionHolofoil", "unlimitedHolofoil"];
+  }
+  if (normalized.includes("holo") || normalized.includes("masterball") || normalized.includes("pokeball")) {
+    return ["holofoil", "reverseHolofoil", "normal", "1stEditionHolofoil", "unlimitedHolofoil"];
+  }
+  return ["normal", "holofoil", "reverseHolofoil", "1stEditionHolofoil", "unlimitedHolofoil"];
+}
+
 function scorePriceCandidate(candidate, card) {
   let score = 0;
   if (candidate.name.toLowerCase() === (card.englishName || "").toLowerCase()) score += 20;
-  if (candidate.number && candidate.number === card.number) score += 8;
+  if (candidate.number && card.number && candidate.number === card.number) score += 12;
   if (candidate.marketPrice) score += 5;
   if (candidate.setName && card.setName && candidate.setName === card.setName) score += 5;
+  if (candidate.rarity && card.rarity && candidate.rarity === card.rarity) score += 3;
   return score;
 }
 

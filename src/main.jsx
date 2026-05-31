@@ -205,21 +205,26 @@ function Dashboard({ session }) {
     try {
       const ratePayload = await loadCurrencyRates();
       setRates(ratePayload.rates);
+      let updatedCount = 0;
+      let missingCount = 0;
 
       for (const [index, card] of collection.entries()) {
         setStatus(`가격 ${index + 1}/${collection.length}`);
         const patch = await refreshCardPrice(card);
         if (Number(patch.marketPrice || 0) > 0) {
+          updatedCount += 1;
           await updateCloudCard(user.id, card.uid, {
             ...patch,
             lastPriceSyncAt: new Date().toISOString(),
           });
+        } else {
+          missingCount += 1;
         }
       }
 
       const cards = await reloadCollection();
       await recordPortfolioSnapshot(cards);
-      setStatus("가격 갱신 완료");
+      setStatus(`가격 갱신 완료: ${updatedCount}개 갱신 · ${missingCount}개 미조회`);
     } catch (error) {
       setStatus(error.message);
     } finally {
