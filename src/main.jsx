@@ -39,12 +39,13 @@ import {
   updateCloudCard,
 } from "./cloudDb.js";
 import { DISPLAY_CURRENCIES, convertMoney, formatMoney, loadCurrencyRates } from "./currency.js";
-import { captureFrame, startCamera, stopCamera } from "./scanner.js";
+import { startCamera, stopCamera } from "./scanner.js";
 import { hasSupabaseConfig, supabase } from "./supabaseClient.js";
 import "./styles.css";
 
 const THEME_KEY = "pokebinder.theme";
 const LAYOUT_KEY = "pokebinder.collectionLayout";
+const APP_ICON_SRC = `${import.meta.env.BASE_URL}icons/icon.png`;
 const VIEW_ITEMS = [
   { id: "search", label: "검색", icon: Search },
   { id: "collection", label: "컬렉션", icon: Sparkles },
@@ -105,16 +106,13 @@ function Dashboard({ session }) {
   const [displayCurrency, setDisplayCurrency] = useState("JPY");
   const [rates, setRates] = useState({ USD: 1, JPY: 157, KRW: 1380, EUR: 0.92 });
   const [themeMode, setThemeMode] = useThemeMode();
-  const [scanText, setScanText] = useState("");
   const [scanLanguage, setScanLanguage] = useState("ja");
   const [scanOverlayOpen, setScanOverlayOpen] = useState(false);
   const [scanCandidates, setScanCandidates] = useState([]);
   const [scanBusy, setScanBusy] = useState(false);
-  const [capturedImage, setCapturedImage] = useState("");
   const [cameraActive, setCameraActive] = useState(false);
   const videoRef = useRef(null);
   const canvasRef = useRef(null);
-  const captureRef = useRef(null);
   const toastTimerRef = useRef(null);
 
   useEffect(() => {
@@ -333,20 +331,9 @@ function Dashboard({ session }) {
       await startCamera(videoRef.current);
       setCameraActive(true);
       setStatus("카메라 활성");
-      if (captureRef.current) captureRef.current.hidden = true;
     } catch (error) {
       setStatus(error.message);
     }
-  }
-
-  function handleCapture() {
-    const image = captureFrame(videoRef.current, canvasRef.current);
-    setCapturedImage(image);
-    if (captureRef.current) {
-      captureRef.current.style.background = `center / cover no-repeat url(${image})`;
-      captureRef.current.hidden = false;
-    }
-    setStatus("촬영 완료");
   }
 
   function handleStopCamera() {
@@ -356,44 +343,27 @@ function Dashboard({ session }) {
   }
 
   function handleOpenScanner() {
-    setCapturedImage("");
     setScanOverlayOpen(true);
     setStatus("스캔 창 준비");
   }
 
   function handleCloseScanner() {
     handleStopCamera();
-    setCapturedImage("");
     setScanOverlayOpen(false);
   }
 
-  function handleRetake() {
-    setCapturedImage("");
-    if (captureRef.current) captureRef.current.hidden = true;
-    setStatus("재촬영 준비");
-  }
-
   async function handleScanSearch() {
-    const trimmed = scanText.trim();
-    if (!trimmed) {
-      const message = capturedImage ? "이미지 매칭 모델 연결 대기" : "카드명 또는 번호를 입력해 주세요";
+    setScanBusy(true);
+    setStatus("이미지 매칭 준비 중");
+    try {
+      await new Promise((resolve) => setTimeout(resolve, 450));
+      setScanCandidates([]);
+      const message = "이미지 매칭 모델 연결 전입니다.";
       setStatus(message);
       showToast(message);
-      return;
-    }
-
-    setScanBusy(true);
-    setQuery(trimmed);
-    setStatus("스캔 후보 검색");
-    try {
-      const source = scanLanguage === "all" ? "all" : `tcgdex-${scanLanguage}`;
-      const cards = await searchCards(source, trimmed);
-      setScanCandidates(cards);
-      setResults(cards);
-      setStatus(`${cards.length}개 후보`);
     } catch (error) {
       setScanCandidates([]);
-      setStatus(error.message || "후보 검색 실패");
+      setStatus(error.message || "이미지 매칭 실패");
     } finally {
       setScanBusy(false);
     }
@@ -416,7 +386,7 @@ function Dashboard({ session }) {
     <div className="app">
       <aside className="sidebar">
         <div className="brand">
-          <span className="brand-mark">P</span>
+          <BrandMark />
           <div>
             <strong>PokeBinder</strong>
             <small>Private TCG vault</small>
@@ -537,25 +507,19 @@ function Dashboard({ session }) {
 
             {activeView === "scan" && (
               <ScanView
-                scanText={scanText}
-                setScanText={setScanText}
                 scanLanguage={scanLanguage}
                 setScanLanguage={setScanLanguage}
                 cameraActive={cameraActive}
                 overlayOpen={scanOverlayOpen}
                 candidates={scanCandidates}
                 busy={scanBusy}
-                capturedImage={capturedImage}
                 displayCurrency={displayCurrency}
                 rates={rates}
                 videoRef={videoRef}
                 canvasRef={canvasRef}
-                captureRef={captureRef}
                 onOpen={handleOpenScanner}
                 onClose={handleCloseScanner}
                 onStart={handleStartCamera}
-                onCapture={handleCapture}
-                onRetake={handleRetake}
                 onStop={handleStopCamera}
                 onSearch={handleScanSearch}
                 onAdd={handleAddCard}
@@ -646,7 +610,7 @@ function AuthScreen() {
     <div className="auth-page">
       <section className="auth-card">
         <div className="auth-hero">
-          <span className="brand-mark">P</span>
+          <BrandMark />
           <h1>PokeBinder</h1>
           <p>카드 컬렉션, 가격 기록, 스캔 후보를 한 곳에서 관리하세요.</p>
         </div>
@@ -1177,25 +1141,19 @@ function CardDetailModal({ card, displayCurrency, rates, onClose, onPatch, onQua
 }
 
 function ScanView({
-  scanText,
-  setScanText,
   scanLanguage,
   setScanLanguage,
   cameraActive,
   overlayOpen,
   candidates,
   busy,
-  capturedImage,
   displayCurrency,
   rates,
   videoRef,
   canvasRef,
-  captureRef,
   onOpen,
   onClose,
   onStart,
-  onCapture,
-  onRetake,
   onStop,
   onSearch,
   onAdd,
@@ -1222,14 +1180,11 @@ function ScanView({
 
       {overlayOpen && (
         <ScannerOverlay
-          scanText={scanText}
-          setScanText={setScanText}
           scanLanguage={scanLanguage}
           setScanLanguage={setScanLanguage}
           cameraActive={cameraActive}
           candidates={candidates}
           busy={busy}
-          capturedImage={capturedImage}
           displayCurrency={displayCurrency}
           rates={rates}
           videoRef={videoRef}
@@ -1237,8 +1192,6 @@ function ScanView({
           captureRef={captureRef}
           onClose={onClose}
           onStart={onStart}
-          onCapture={onCapture}
-          onRetake={onRetake}
           onStop={onStop}
           onSearch={onSearch}
           onAdd={onAdd}
@@ -1249,23 +1202,17 @@ function ScanView({
 }
 
 function ScannerOverlay({
-  scanText,
-  setScanText,
   scanLanguage,
   setScanLanguage,
   cameraActive,
   candidates,
   busy,
-  capturedImage,
   displayCurrency,
   rates,
   videoRef,
   canvasRef,
-  captureRef,
   onClose,
   onStart,
-  onCapture,
-  onRetake,
   onStop,
   onSearch,
   onAdd,
@@ -1276,10 +1223,9 @@ function ScannerOverlay({
   }, []);
 
   return (
-    <div className="scanner-overlay" role="dialog" aria-modal="true" aria-label="카드 스캔">
+      <div className="scanner-overlay" role="dialog" aria-modal="true" aria-label="카드 스캔">
       <video ref={videoRef} playsInline muted />
       <canvas ref={canvasRef} hidden />
-      <div ref={captureRef} className="capture-preview" hidden />
 
       <div className="scanner-topbar">
         <div>
@@ -1298,27 +1244,28 @@ function ScannerOverlay({
         <span />
       </div>
 
-      <div className="scanner-bottom-sheet">
-        <div className="scan-command-row">
-          <label className="scan-input scan-language">
-            <span>언어</span>
-            <select value={scanLanguage} onChange={(event) => setScanLanguage(event.target.value)}>
-              <option value="ja">일본판</option>
-              <option value="ko">한국판</option>
-              <option value="en">영문판</option>
-              <option value="all">전체</option>
-            </select>
-          </label>
-          <label className="scan-input">
-            <span>인식 텍스트</span>
-            <input value={scanText} onChange={(event) => setScanText(event.target.value)} placeholder="카드명 또는 번호" />
-          </label>
-          <button className="soft-button" type="button" onClick={capturedImage ? onRetake : onCapture} disabled={!cameraActive}>
-            {capturedImage ? "다시 촬영" : "촬영"}
-          </button>
-          <button className={busy ? "primary-button is-loading" : "primary-button"} type="button" onClick={onSearch} disabled={busy}>
-            {busy && <span className="button-spinner" />}
-            {busy ? "검색 중" : "텍스트 검색"}
+      <div className="scanner-bottom-sheet compact">
+        <div className="scan-control-rail">
+          <div className="scan-language-tabs" role="group" aria-label="스캔 언어">
+            {[
+              ["ja", "일본"],
+              ["ko", "한국"],
+              ["en", "영문"],
+              ["all", "전체"],
+            ].map(([value, label]) => (
+              <button
+                className={scanLanguage === value ? "active" : ""}
+                key={value}
+                type="button"
+                onClick={() => setScanLanguage(value)}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+          <button className={busy ? "scan-live-state is-loading" : "scan-live-state"} type="button" onClick={onSearch} disabled={busy || !cameraActive}>
+            {busy ? <span className="button-spinner" /> : <Sparkles size={16} />}
+            {busy ? "분석 중" : cameraActive ? "라이브 인식" : "준비 중"}
           </button>
         </div>
 
@@ -1575,10 +1522,18 @@ function Toast({ text }) {
   );
 }
 
+function BrandMark() {
+  return (
+    <span className="brand-mark">
+      <img src={APP_ICON_SRC} alt="" />
+    </span>
+  );
+}
+
 function Splash({ compact }) {
   return (
     <div className={compact ? "splash compact" : "splash"}>
-      <span className="brand-mark">P</span>
+      <BrandMark />
       <strong>PokeBinder</strong>
     </div>
   );
@@ -1808,7 +1763,8 @@ function registerServiceWorker() {
 
 function installPwaMetadata() {
   upsertHeadLink("manifest", `${import.meta.env.BASE_URL}manifest.webmanifest`);
-  upsertHeadLink("icon", `${import.meta.env.BASE_URL}icons/icon.svg`, "image/svg+xml");
+  upsertHeadLink("icon", APP_ICON_SRC, "image/png");
+  upsertHeadLink("apple-touch-icon", `${import.meta.env.BASE_URL}icons/icon-192.png`, "image/png");
 }
 
 function upsertHeadLink(rel, href, type) {

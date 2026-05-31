@@ -156,6 +156,18 @@ button:focus-visible {
   height: 44px;
 }
 
+.brand-mark {
+  background: var(--surface-solid);
+  box-shadow: 0 10px 24px rgba(20, 25, 35, 0.14);
+  overflow: hidden;
+}
+
+.brand-mark img {
+  height: 100%;
+  object-fit: cover;
+  width: 100%;
+}
+
 .brand strong,
 .account-mini strong {
   display: block;
@@ -1074,42 +1086,62 @@ button:focus-visible {
   z-index: 3;
 }
 
-.scan-command-row {
-  align-items: end;
+.scanner-bottom-sheet.compact {
+  gap: 10px;
+  padding: 10px 14px 14px;
+}
+
+.scan-control-rail {
+  align-items: center;
   display: grid;
   gap: 10px;
-  grid-template-columns: 150px minmax(180px, 1fr) auto auto;
+  grid-template-columns: minmax(0, 1fr) auto;
 }
 
-.scan-input {
-  color: rgba(255, 255, 255, 0.72);
+.scan-language-tabs {
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 999px;
   display: grid;
-  font-size: 0.78rem;
-  font-weight: 780;
-  gap: 6px;
+  gap: 3px;
+  grid-template-columns: repeat(4, 1fr);
+  min-height: 42px;
+  padding: 3px;
 }
 
-.scan-input input {
-  background: rgba(255, 255, 255, 0.1);
-  border-color: rgba(255, 255, 255, 0.16);
-  color: white;
+.scan-language-tabs button,
+.scan-live-state {
+  align-items: center;
+  border-radius: 999px;
+  display: inline-flex;
+  font-size: 0.82rem;
+  font-weight: 860;
+  justify-content: center;
+  min-height: 36px;
+  padding: 0 12px;
 }
 
-.scan-input select {
-  background: rgba(255, 255, 255, 0.1);
-  border-color: rgba(255, 255, 255, 0.16);
-  color: white;
-  min-height: 46px;
+.scan-language-tabs button {
+  background: transparent;
+  color: rgba(255, 255, 255, 0.68);
 }
 
-.scan-input input::placeholder {
-  color: rgba(255, 255, 255, 0.52);
+.scan-language-tabs button.active {
+  background: white;
+  color: #101318;
+}
+
+.scan-live-state {
+  background: rgba(116, 240, 194, 0.14);
+  color: #74f0c2;
+  gap: 7px;
+  white-space: nowrap;
 }
 
 .scan-candidate-strip {
   display: grid;
   gap: 10px;
-  grid-auto-columns: minmax(220px, 280px);
+  grid-auto-columns: minmax(180px, 240px);
   grid-auto-flow: column;
   overflow-x: auto;
   overscroll-behavior-x: contain;
@@ -1179,7 +1211,7 @@ button:focus-visible {
   display: inline-flex;
   font-weight: 820;
   gap: 8px;
-  min-height: 82px;
+  min-height: 52px;
   padding: 0 14px;
 }
 
@@ -1711,21 +1743,30 @@ button:focus-visible {
   }
 
   .scan-target {
-    top: 38%;
-    width: min(78vw, 30.07vh);
+    top: 42%;
+    width: min(72vw, 28vh);
   }
 
   .scanner-bottom-sheet {
     border-radius: 22px 22px 0 0;
-    padding: 14px 12px 16px;
+    padding: 10px 10px 12px;
   }
 
-  .scan-command-row {
+  .scan-control-rail {
+    gap: 8px;
     grid-template-columns: 1fr;
   }
 
   .scan-candidate-strip {
-    grid-auto-columns: minmax(196px, 76vw);
+    grid-auto-columns: minmax(174px, 64vw);
+  }
+
+  .scan-candidate-empty {
+    min-height: 46px;
+  }
+
+  .scan-live-state {
+    width: 100%;
   }
 
   .panel-actions {
