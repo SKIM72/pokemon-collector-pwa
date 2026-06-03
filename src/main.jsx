@@ -1194,7 +1194,6 @@ function ScanView({
           rates={rates}
           videoRef={videoRef}
           canvasRef={canvasRef}
-          captureRef={captureRef}
           onClose={onClose}
           onStart={onStart}
           onStop={onStop}
