@@ -15,6 +15,7 @@ Personal Pokemon TCG collection PWA built with React + Vite.
 - Login, signup, password reset, profile, settings, logout
 - Light, dark, and system theme modes
 - Camera capture entry point for the future OCR/image matching pipeline
+- Android native CameraX scanner MVP with continuous frame stability detection
 - JSON export/import backup
 
 ## Run Locally
@@ -78,11 +79,17 @@ https://<github-user>.github.io/<repository-name>/
 
 ## Next Milestones
 
-1. Add OpenCV.js card rectangle detection and perspective crop.
-2. Cache TCGdex card image embeddings for visual matching.
-3. Add Supabase Edge Function adapters for yuyu-tei and TCGBOX.
-4. Move pricing snapshots and multi-device sync into the OCI backend.
-5. Wrap the PWA with Capacitor and add native ML Kit if Android accuracy becomes important.
+1. Deploy the `card-image-match` Supabase Edge Function and vector index.
+2. Cache TCGdex and Japanese card image embeddings for visual matching.
+3. Add card rectangle/perspective correction before embedding generation.
+4. Add Supabase Edge Function adapters for Japanese and Korean local pricing.
+5. Connect Android scan sessions directly to the existing portfolio tables.
+
+## Android Native Scanner
+
+The native CameraX MVP lives in [`android-native`](./android-native). It keeps the
+PWA as the collection and settings experience while providing the continuous,
+low-latency scanner shown in the reference videos.
 
 ## Data Sources
 

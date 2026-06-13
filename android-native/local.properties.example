@@ -1,0 +1,4 @@
+sdk.dir=/Users/your-name/Library/Android/sdk
+SUPABASE_URL=https://your-project-id.supabase.co
+SUPABASE_ANON_KEY=your-anon-public-key
+CARD_RECOGNITION_FUNCTION=card-image-match
