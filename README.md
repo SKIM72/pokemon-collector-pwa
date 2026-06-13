@@ -16,6 +16,7 @@ Personal Pokemon TCG collection PWA built with React + Vite.
 - Light, dark, and system theme modes
 - Camera capture entry point for the future OCR/image matching pipeline
 - Android native CameraX scanner MVP with continuous frame stability detection
+- On-device MediaPipe image embeddings with Supabase pgvector candidate search
 - JSON export/import backup
 
 ## Run Locally
@@ -79,10 +80,10 @@ https://<github-user>.github.io/<repository-name>/
 
 ## Next Milestones
 
-1. Deploy the `card-image-match` Supabase Edge Function and vector index.
-2. Cache TCGdex and Japanese card image embeddings for visual matching.
+1. Expand the Japanese reference index beyond the initial validation batch.
+2. Measure recognition quality with real camera photos and tune thresholds.
 3. Add card rectangle/perspective correction before embedding generation.
-4. Add Supabase Edge Function adapters for Japanese and Korean local pricing.
+4. Index Korean and English reference images.
 5. Connect Android scan sessions directly to the existing portfolio tables.
 
 ## Android Native Scanner
@@ -90,6 +91,25 @@ https://<github-user>.github.io/<repository-name>/
 The native CameraX MVP lives in [`android-native`](./android-native). It keeps the
 PWA as the collection and settings experience while providing the continuous,
 low-latency scanner shown in the reference videos.
+
+The scanner uses the official MediaPipe MobileNetV3 Small image embedder on the
+phone. Only the 1024-dimension embedding is sent to the `card-image-match`
+Supabase Edge Function. Reference embeddings are generated from TCGdex images
+with [`scripts/index_tcgdex_cards.py`](./scripts/index_tcgdex_cards.py) and
+searched by cosine similarity in pgvector.
+
+Apply and deploy the scanner backend:
+
+```bash
+supabase link --project-ref gyxeddbvebnefasqxyiv
+supabase db push
+supabase functions deploy card-image-match
+```
+
+For repeatable bulk indexing, the manual `Index card images` GitHub Actions
+workflow accepts a language, card limit, and TCGdex start page. Add
+`SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` as repository secrets before
+running it.
 
 ## Data Sources
 

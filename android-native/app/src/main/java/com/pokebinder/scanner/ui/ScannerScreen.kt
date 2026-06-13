@@ -60,6 +60,7 @@ import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import coil.compose.AsyncImage
 import com.pokebinder.scanner.model.CardLanguage
+import com.pokebinder.scanner.model.RecognizedCard
 import com.pokebinder.scanner.model.ScanPhase
 import com.pokebinder.scanner.model.ScannerUiState
 import com.pokebinder.scanner.model.SessionCard
@@ -72,6 +73,7 @@ fun ScannerScreen(
     onLanguageSelected: (CardLanguage) -> Unit,
     onFrameProbe: (com.pokebinder.scanner.model.FrameProbe) -> Unit,
     onStableFrame: (ByteArray) -> Unit,
+    onCandidateSelected: (RecognizedCard) -> Unit,
     onQuantityChanged: (String, Int) -> Unit,
     onClearSession: () -> Unit,
     onClose: () -> Unit,
@@ -137,6 +139,7 @@ fun ScannerScreen(
 
         ScannerBottomPanel(
             state = state,
+            onCandidateSelected = onCandidateSelected,
             onQuantityChanged = onQuantityChanged,
             onClearSession = onClearSession,
             modifier = Modifier.align(Alignment.BottomCenter),
@@ -346,6 +349,7 @@ private fun CardGuide(
 @Composable
 private fun ScannerBottomPanel(
     state: ScannerUiState,
+    onCandidateSelected: (RecognizedCard) -> Unit,
     onQuantityChanged: (String, Int) -> Unit,
     onClearSession: () -> Unit,
     modifier: Modifier = Modifier,
@@ -455,6 +459,31 @@ private fun ScannerBottomPanel(
                 }
             }
 
+            if (state.candidates.size > 1) {
+                Spacer(modifier = Modifier.height(12.dp))
+                Text(
+                    text = "일치 후보",
+                    color = Color.White,
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.Bold,
+                )
+                Spacer(modifier = Modifier.height(7.dp))
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .horizontalScroll(rememberScrollState()),
+                ) {
+                    state.candidates.forEach { candidate ->
+                        CandidateCardItem(
+                            card = candidate,
+                            selected = candidate.id == state.currentMatch?.id,
+                            onClick = { onCandidateSelected(candidate) },
+                        )
+                    }
+                }
+            }
+
             if (state.sessionCards.isNotEmpty()) {
                 Spacer(modifier = Modifier.height(12.dp))
                 Row(
@@ -488,6 +517,62 @@ private fun ScannerBottomPanel(
                         SessionCardItem(item, onQuantityChanged)
                     }
                 }
+            }
+        }
+    }
+}
+
+@Composable
+private fun CandidateCardItem(
+    card: RecognizedCard,
+    selected: Boolean,
+    onClick: () -> Unit,
+) {
+    val borderColor = if (selected) {
+        MaterialTheme.colorScheme.primary
+    } else {
+        Color(0xFF303945)
+    }
+    Surface(
+        color = Color(0xFF171D24),
+        shape = RoundedCornerShape(10.dp),
+        modifier = Modifier
+            .width(132.dp)
+            .border(1.dp, borderColor, RoundedCornerShape(10.dp))
+            .clickable(onClick = onClick),
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.padding(7.dp),
+        ) {
+            AsyncImage(
+                model = card.imageUrl,
+                contentDescription = card.name,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier
+                    .size(width = 34.dp, height = 47.dp)
+                    .background(Color(0xFF252D37), RoundedCornerShape(5.dp)),
+            )
+            Spacer(modifier = Modifier.width(7.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = card.name,
+                    color = Color.White,
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Text(
+                    text = "${(card.confidence * 100).toInt()}%",
+                    color = if (selected) {
+                        MaterialTheme.colorScheme.primary
+                    } else {
+                        Color(0xFFADB6C2)
+                    },
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold,
+                )
             }
         }
     }

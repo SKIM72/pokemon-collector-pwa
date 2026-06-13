@@ -92,6 +92,7 @@ dependencies {
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.6.4")
     implementation("com.squareup.okhttp3:okhttp:4.10.0")
     implementation("io.coil-kt:coil-compose:2.2.2")
+    implementation("com.google.mediapipe:tasks-vision:0.10.35")
 
     testImplementation("junit:junit:4.13.2")
 }

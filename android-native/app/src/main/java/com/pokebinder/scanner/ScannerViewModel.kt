@@ -1,24 +1,28 @@
 package com.pokebinder.scanner
 
-import androidx.lifecycle.ViewModel
+import android.app.Application
+import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.pokebinder.scanner.data.CardRecognitionRepository
 import com.pokebinder.scanner.data.EdgeFunctionCardRecognitionRepository
 import com.pokebinder.scanner.model.CardLanguage
 import com.pokebinder.scanner.model.FrameProbe
 import com.pokebinder.scanner.model.RecognitionOutcome
+import com.pokebinder.scanner.model.RecognizedCard
 import com.pokebinder.scanner.model.ScanPhase
 import com.pokebinder.scanner.model.ScannerUiState
 import com.pokebinder.scanner.model.SessionCard
+import com.pokebinder.scanner.scanner.CardImageEmbedder
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
-class ScannerViewModel(
-    private val repository: CardRecognitionRepository = EdgeFunctionCardRecognitionRepository(),
-) : ViewModel() {
+class ScannerViewModel(application: Application) : AndroidViewModel(application) {
+    private val imageEmbedder = CardImageEmbedder(application)
+    private val repository: CardRecognitionRepository =
+        EdgeFunctionCardRecognitionRepository(imageEmbedder)
 
     private val mutableState = MutableStateFlow(
         ScannerUiState(
@@ -38,6 +42,7 @@ class ScannerViewModel(
                 language = language,
                 phase = ScanPhase.WAITING,
                 currentMatch = null,
+                candidates = emptyList(),
                 statusMessage = "카드를 가이드 안에 맞춰 주세요",
             )
         }
@@ -107,10 +112,41 @@ class ScannerViewModel(
             it.copy(
                 sessionCards = emptyList(),
                 currentMatch = null,
+                candidates = emptyList(),
                 phase = ScanPhase.WAITING,
                 statusMessage = "새 스캔을 시작합니다",
             )
         }
+    }
+
+    fun selectCandidate(candidate: RecognizedCard) {
+        mutableState.update { current ->
+            val previous = current.currentMatch ?: return@update current
+            if (previous.id == candidate.id) return@update current
+
+            val withoutPrevious = decrementCard(current.sessionCards, previous.id)
+            val existingCandidate = withoutPrevious.firstOrNull { it.card.id == candidate.id }
+            val correctedSession = if (existingCandidate == null) {
+                listOf(SessionCard(candidate)) + withoutPrevious
+            } else {
+                withoutPrevious.map {
+                    if (it.card.id == candidate.id) it.copy(quantity = it.quantity + 1) else it
+                }
+            }
+
+            lastMatchedId = candidate.id
+            lastMatchedAt = System.currentTimeMillis()
+            current.copy(
+                currentMatch = candidate,
+                sessionCards = correctedSession,
+                statusMessage = "${candidate.name}(으)로 후보를 변경했습니다",
+            )
+        }
+    }
+
+    override fun onCleared() {
+        imageEmbedder.close()
+        super.onCleared()
     }
 
     private fun applyMatch(outcome: RecognitionOutcome.Match) {
@@ -135,6 +171,7 @@ class ScannerViewModel(
             }
             current.copy(
                 currentMatch = card,
+                candidates = outcome.candidates,
                 sessionCards = updatedSession,
                 phase = ScanPhase.MATCHED,
                 statusMessage = if (isImmediateDuplicate) {
@@ -145,5 +182,13 @@ class ScannerViewModel(
                 isEndpointConfigured = true,
             )
         }
+    }
+
+    private fun decrementCard(
+        cards: List<SessionCard>,
+        cardId: String,
+    ): List<SessionCard> = cards.mapNotNull { item ->
+        if (item.card.id != cardId) return@mapNotNull item
+        if (item.quantity <= 1) null else item.copy(quantity = item.quantity - 1)
     }
 }

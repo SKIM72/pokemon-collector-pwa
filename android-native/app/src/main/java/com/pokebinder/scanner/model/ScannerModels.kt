@@ -42,6 +42,7 @@ data class ScannerUiState(
     val phase: ScanPhase = ScanPhase.WAITING,
     val probe: FrameProbe = FrameProbe(),
     val currentMatch: RecognizedCard? = null,
+    val candidates: List<RecognizedCard> = emptyList(),
     val sessionCards: List<SessionCard> = emptyList(),
     val statusMessage: String = "카드를 가이드 안에 맞춰 주세요",
     val isEndpointConfigured: Boolean = true,
@@ -63,7 +64,10 @@ data class ScannerUiState(
 }
 
 sealed interface RecognitionOutcome {
-    data class Match(val card: RecognizedCard) : RecognitionOutcome
+    data class Match(
+        val card: RecognizedCard,
+        val candidates: List<RecognizedCard>,
+    ) : RecognitionOutcome
     object NoMatch : RecognitionOutcome
     data class Unavailable(val message: String) : RecognitionOutcome
 }

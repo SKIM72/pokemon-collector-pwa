@@ -1,16 +1,17 @@
 package com.pokebinder.scanner.data
 
-import android.util.Base64
 import com.pokebinder.scanner.BuildConfig
 import com.pokebinder.scanner.model.CardLanguage
 import com.pokebinder.scanner.model.RecognitionOutcome
 import com.pokebinder.scanner.model.RecognizedCard
+import com.pokebinder.scanner.scanner.CardImageEmbedder
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
+import org.json.JSONArray
 import org.json.JSONObject
 import java.util.concurrent.TimeUnit
 
@@ -19,6 +20,7 @@ interface CardRecognitionRepository {
 }
 
 class EdgeFunctionCardRecognitionRepository(
+    private val imageEmbedder: CardImageEmbedder,
     private val supabaseUrl: String = BuildConfig.SUPABASE_URL,
     private val anonKey: String = BuildConfig.SUPABASE_ANON_KEY,
     private val functionName: String = BuildConfig.CARD_RECOGNITION_FUNCTION,
@@ -38,9 +40,18 @@ class EdgeFunctionCardRecognitionRepository(
             )
         }
 
+        val fingerprint = runCatching { imageEmbedder.embed(jpegBytes) }
+            .getOrElse { error ->
+                return@withContext RecognitionOutcome.Unavailable(
+                    error.message ?: "이미지 특징값 생성에 실패했습니다.",
+                )
+            }
         val payload = JSONObject()
             .put("language", language.code)
-            .put("imageBase64", Base64.encodeToString(jpegBytes, Base64.NO_WRAP))
+            .put("embedding", JSONArray(fingerprint.embedding.toList()))
+            .put("perceptualHash", fingerprint.perceptualHash)
+            .put("matchCount", 5)
+            .put("minSimilarity", 0.55)
 
         val request = Request.Builder()
             .url("${supabaseUrl.trimEnd('/')}/functions/v1/$functionName")
@@ -67,33 +78,23 @@ class EdgeFunctionCardRecognitionRepository(
                 if (body.isBlank()) return@use RecognitionOutcome.NoMatch
 
                 val json = JSONObject(body)
+                if (json.isNull("card")) return@use RecognitionOutcome.NoMatch
                 val cardJson = json.optJSONObject("card") ?: json
-                val id = cardJson.optString("id")
-                val name = cardJson.optString("name")
-                if (id.isBlank() || name.isBlank()) return@use RecognitionOutcome.NoMatch
+                val card = parseCard(cardJson, language)
+                    ?: return@use RecognitionOutcome.NoMatch
+                val candidateJson = json.optJSONArray("candidates")
+                val candidates = buildList<RecognizedCard> {
+                    if (candidateJson != null) {
+                        for (index in 0 until candidateJson.length()) {
+                            candidateJson.optJSONObject(index)
+                                ?.let { parseCard(it, language) }
+                                ?.let(::add)
+                        }
+                    }
+                    if (none { it.id == card.id }) add(0, card)
+                }
 
-                RecognitionOutcome.Match(
-                    RecognizedCard(
-                        id = id,
-                        name = name,
-                        setName = cardJson.optString("setName", "세트 정보 없음"),
-                        number = cardJson.optString("number", "-"),
-                        imageUrl = cardJson.optString("imageUrl").takeIf { it.isNotBlank() },
-                        marketPrice = cardJson.optDouble("marketPrice")
-                            .takeUnless { it.isNaN() || it <= 0.0 },
-                        currency = cardJson.optString(
-                            "currency",
-                            when (language) {
-                                CardLanguage.JAPANESE -> "JPY"
-                                CardLanguage.KOREAN -> "KRW"
-                                CardLanguage.ENGLISH -> "USD"
-                            },
-                        ),
-                        confidence = cardJson.optDouble("confidence", 0.0)
-                            .coerceIn(0.0, 1.0),
-                        language = language,
-                    ),
-                )
+                RecognitionOutcome.Match(card, candidates)
             }
         }.getOrElse { error ->
             RecognitionOutcome.Unavailable(
@@ -104,5 +105,34 @@ class EdgeFunctionCardRecognitionRepository(
 
     private companion object {
         val JSON_MEDIA_TYPE = "application/json; charset=utf-8".toMediaType()
+
+        fun parseCard(
+            json: JSONObject,
+            language: CardLanguage,
+        ): RecognizedCard? {
+            val id = json.optString("id")
+            val name = json.optString("name")
+            if (id.isBlank() || name.isBlank()) return null
+
+            return RecognizedCard(
+                id = id,
+                name = name,
+                setName = json.optString("setName", "세트 정보 없음"),
+                number = json.optString("number", "-"),
+                imageUrl = json.optString("imageUrl").takeIf { it.isNotBlank() },
+                marketPrice = json.optDouble("marketPrice")
+                    .takeUnless { it.isNaN() || it <= 0.0 },
+                currency = json.optString(
+                    "currency",
+                    when (language) {
+                        CardLanguage.JAPANESE -> "JPY"
+                        CardLanguage.KOREAN -> "KRW"
+                        CardLanguage.ENGLISH -> "USD"
+                    },
+                ),
+                confidence = json.optDouble("confidence", 0.0).coerceIn(0.0, 1.0),
+                language = language,
+            )
+        }
     }
 }

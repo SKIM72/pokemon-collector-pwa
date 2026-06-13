@@ -22,6 +22,7 @@ class MainActivity : ComponentActivity() {
                     onLanguageSelected = scannerViewModel::selectLanguage,
                     onFrameProbe = scannerViewModel::onFrameProbe,
                     onStableFrame = scannerViewModel::onStableFrame,
+                    onCandidateSelected = scannerViewModel::selectCandidate,
                     onQuantityChanged = scannerViewModel::changeQuantity,
                     onClearSession = scannerViewModel::clearSession,
                     onClose = ::finish,
