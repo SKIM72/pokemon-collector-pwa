@@ -3,29 +3,43 @@ package com.pokebinder.scanner
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
-import androidx.compose.runtime.collectAsState
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.collectAsState
 import androidx.lifecycle.viewmodel.compose.viewModel
-import com.pokebinder.scanner.ui.ScannerScreen
+import com.pokebinder.scanner.ui.PokeBinderApp
+import com.pokebinder.scanner.ui.ThemeMode
 import com.pokebinder.scanner.ui.theme.PokeBinderTheme
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContent {
-            PokeBinderTheme {
+            var themeMode by rememberSaveable { mutableStateOf(ThemeMode.SYSTEM) }
+            val darkTheme = when (themeMode) {
+                ThemeMode.LIGHT -> false
+                ThemeMode.DARK -> true
+                ThemeMode.SYSTEM -> isSystemInDarkTheme()
+            }
+
+            PokeBinderTheme(darkTheme = darkTheme) {
                 val scannerViewModel: ScannerViewModel = viewModel()
                 val state by scannerViewModel.state.collectAsState()
 
-                ScannerScreen(
+                PokeBinderApp(
                     state = state,
+                    themeMode = themeMode,
+                    onThemeModeChanged = { themeMode = it },
                     onLanguageSelected = scannerViewModel::selectLanguage,
                     onFrameProbe = scannerViewModel::onFrameProbe,
                     onStableFrame = scannerViewModel::onStableFrame,
                     onCandidateSelected = scannerViewModel::selectCandidate,
                     onQuantityChanged = scannerViewModel::changeQuantity,
+                    onFavoriteToggle = scannerViewModel::toggleFavorite,
                     onClearSession = scannerViewModel::clearSession,
-                    onClose = ::finish,
                 )
             }
         }

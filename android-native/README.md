@@ -1,12 +1,15 @@
-# PokeBinder Android Scanner
+# PokeBinder Android
 
-Android native scanner MVP based on the reference videos. The existing React PWA and
-Supabase database remain the collection service, while this module focuses on fast,
-continuous camera recognition.
+Android native app shell and scanner based on the reference videos. The existing
+React PWA and Supabase database remain the collection service while the native app
+focuses on fast, continuous camera recognition.
 
 ## Included
 
 - CameraX live preview and frame analysis
+- Native search, collection, favorites, scan, and settings tabs
+- Collection-first launch screen instead of opening the camera at startup
+- Full-screen scanner that releases the camera when closed
 - 63:88 Pokemon card guide
 - Automatic scan when the center image is bright and stable
 - On-device MediaPipe MobileNetV3 image embedding
@@ -15,6 +18,11 @@ continuous camera recognition.
 - Match confidence, card metadata, and market price overlay
 - Horizontal candidate list with manual correction
 - Duplicate quantity merging and a running scan total
+- Light, dark, and system theme controls
+
+The collection shown in this milestone is the current in-memory scan session.
+Supabase authentication and persistent portfolio synchronization are the next
+native integration step.
 
 ## Open In Android Studio
 

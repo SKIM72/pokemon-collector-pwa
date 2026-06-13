@@ -44,6 +44,7 @@ data class ScannerUiState(
     val currentMatch: RecognizedCard? = null,
     val candidates: List<RecognizedCard> = emptyList(),
     val sessionCards: List<SessionCard> = emptyList(),
+    val favoriteCardIds: Set<String> = emptySet(),
     val statusMessage: String = "카드를 가이드 안에 맞춰 주세요",
     val isEndpointConfigured: Boolean = true,
 ) {
@@ -52,6 +53,9 @@ data class ScannerUiState(
 
     val runningTotal: Double
         get() = sessionCards.sumOf { (it.card.marketPrice ?: 0.0) * it.quantity }
+
+    val favoriteCards: List<SessionCard>
+        get() = sessionCards.filter { it.card.id in favoriteCardIds }
 
     val displayCurrency: String
         get() = currentMatch?.currency

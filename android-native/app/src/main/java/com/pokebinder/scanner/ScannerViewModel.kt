@@ -97,13 +97,26 @@ class ScannerViewModel(application: Application) : AndroidViewModel(application)
 
     fun changeQuantity(cardId: String, delta: Int) {
         mutableState.update { current ->
+            val nextCards = current.sessionCards.mapNotNull { item ->
+                if (item.card.id != cardId) return@mapNotNull item
+                val next = item.quantity + delta
+                if (next <= 0) null else item.copy(quantity = next)
+            }
             current.copy(
-                sessionCards = current.sessionCards.mapNotNull { item ->
-                    if (item.card.id != cardId) return@mapNotNull item
-                    val next = item.quantity + delta
-                    if (next <= 0) null else item.copy(quantity = next)
-                },
+                sessionCards = nextCards,
+                favoriteCardIds = current.favoriteCardIds.intersect(
+                    nextCards.map { it.card.id }.toSet(),
+                ),
             )
+        }
+    }
+
+    fun toggleFavorite(cardId: String) {
+        mutableState.update { current ->
+            val favorites = current.favoriteCardIds.toMutableSet().apply {
+                if (!add(cardId)) remove(cardId)
+            }
+            current.copy(favoriteCardIds = favorites)
         }
     }
 
@@ -111,6 +124,7 @@ class ScannerViewModel(application: Application) : AndroidViewModel(application)
         mutableState.update {
             it.copy(
                 sessionCards = emptyList(),
+                favoriteCardIds = emptySet(),
                 currentMatch = null,
                 candidates = emptyList(),
                 phase = ScanPhase.WAITING,
