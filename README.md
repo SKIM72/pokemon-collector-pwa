@@ -16,6 +16,7 @@ Personal Pokemon TCG collection PWA built with React + Vite.
 - Light, dark, and system theme modes
 - Camera capture entry point for the future OCR/image matching pipeline
 - Android native app shell and CameraX scanner with continuous frame stability detection
+- Android Supabase authentication and shared cloud collection synchronization
 - On-device MediaPipe image embeddings with Supabase pgvector candidate search
 - JSON export/import backup
 
@@ -84,7 +85,7 @@ https://<github-user>.github.io/<repository-name>/
 2. Measure recognition quality with real camera photos and tune thresholds.
 3. Add card rectangle/perspective correction before embedding generation.
 4. Index Korean and English reference images.
-5. Connect Android scan sessions directly to Supabase authentication and the existing portfolio tables.
+5. Add native price history and portfolio snapshot synchronization.
 
 ## Android Native Scanner
 
@@ -94,7 +95,9 @@ low-latency scanner shown in the reference videos.
 
 The Android app opens on a native collection screen with search, favorites,
 scan, and settings tabs. The camera is activated only while the full-screen
-scanner is open.
+scanner is open. Email authentication sessions are stored locally with Android
+encrypted preferences, and scanned cards synchronize with the same Supabase
+collection used by the PWA.
 
 The scanner uses the official MediaPipe MobileNetV3 Small image embedder on the
 phone. Only the 1024-dimension embedding is sent to the `card-image-match`

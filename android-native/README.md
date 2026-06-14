@@ -10,6 +10,10 @@ focuses on fast, continuous camera recognition.
 - Native search, collection, favorites, scan, and settings tabs
 - Collection-first launch screen instead of opening the camera at startup
 - Full-screen scanner that releases the camera when closed
+- Supabase email login, sign-up, password reset, profile, and logout
+- Encrypted local authentication session storage
+- Shared collection synchronization with the React PWA
+- Automatic cloud quantity merge after a successful card scan
 - 63:88 Pokemon card guide
 - Automatic scan when the center image is bright and stable
 - On-device MediaPipe MobileNetV3 image embedding
@@ -20,9 +24,9 @@ focuses on fast, continuous camera recognition.
 - Duplicate quantity merging and a running scan total
 - Light, dark, and system theme controls
 
-The collection shown in this milestone is the current in-memory scan session.
-Supabase authentication and persistent portfolio synchronization are the next
-native integration step.
+The collection is stored in the existing Supabase `collection_cards` table, so
+cards added from Android appear in the React PWA under the same account. Password
+reset emails currently return to the hosted PWA recovery flow.
 
 ## Open In Android Studio
 

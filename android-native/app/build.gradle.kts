@@ -23,8 +23,8 @@ android {
         applicationId = "com.pokebinder.scanner"
         minSdk = 26
         targetSdk = 33
-        versionCode = 3
-        versionName = "0.3.0"
+        versionCode = 4
+        versionName = "0.4.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables.useSupportLibrary = true
@@ -35,6 +35,13 @@ android {
             "String",
             "CARD_RECOGNITION_FUNCTION",
             "\"${localString("CARD_RECOGNITION_FUNCTION").ifBlank { "card-image-match" }}\"",
+        )
+        buildConfigField(
+            "String",
+            "PASSWORD_RESET_REDIRECT_URL",
+            "\"${localString("PASSWORD_RESET_REDIRECT_URL").ifBlank {
+                "https://skim72.github.io/pokemon-collector-pwa/"
+            }}\"",
         )
     }
 
@@ -76,6 +83,7 @@ dependencies {
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.5.1")
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.5.1")
     implementation("androidx.activity:activity-compose:1.6.1")
+    implementation("androidx.security:security-crypto:1.1.0-alpha06")
 
     implementation("androidx.compose.ui:ui:1.3.3")
     implementation("androidx.compose.ui:ui-tooling-preview:1.3.3")

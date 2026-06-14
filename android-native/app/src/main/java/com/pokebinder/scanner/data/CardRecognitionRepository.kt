@@ -132,6 +132,10 @@ class EdgeFunctionCardRecognitionRepository(
                 ),
                 confidence = json.optDouble("confidence", 0.0).coerceIn(0.0, 1.0),
                 language = language,
+                source = json.optString("source", "tcgdex"),
+                setId = json.optString("setId"),
+                rarity = json.optString("rarity"),
+                imageHighUrl = json.optString("imageHighUrl").takeIf { it.isNotBlank() },
             )
         }
     }

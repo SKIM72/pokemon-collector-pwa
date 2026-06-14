@@ -484,7 +484,7 @@ private fun ScannerBottomPanel(
                 }
             }
 
-            if (state.sessionCards.isNotEmpty()) {
+            if (state.recentScanCards.isNotEmpty()) {
                 Spacer(modifier = Modifier.height(12.dp))
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
@@ -513,7 +513,7 @@ private fun ScannerBottomPanel(
                         .fillMaxWidth()
                         .horizontalScroll(rememberScrollState()),
                 ) {
-                    state.sessionCards.forEach { item ->
+                    state.recentScanCards.forEach { item ->
                         SessionCardItem(item, onQuantityChanged)
                     }
                 }
@@ -614,7 +614,7 @@ private fun SessionCardItem(
                     SmallQuantityButton(
                         icon = Icons.Rounded.Remove,
                         label = "수량 줄이기",
-                        onClick = { onQuantityChanged(item.card.id, -1) },
+                        onClick = { onQuantityChanged(item.collectionKey, -1) },
                     )
                     Text(
                         text = item.quantity.toString(),
@@ -625,7 +625,7 @@ private fun SessionCardItem(
                     SmallQuantityButton(
                         icon = Icons.Rounded.Add,
                         label = "수량 늘리기",
-                        onClick = { onQuantityChanged(item.card.id, 1) },
+                        onClick = { onQuantityChanged(item.collectionKey, 1) },
                     )
                 }
             }

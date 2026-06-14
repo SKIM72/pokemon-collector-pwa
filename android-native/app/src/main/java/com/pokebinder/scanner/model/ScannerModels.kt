@@ -14,6 +14,18 @@ enum class ScanPhase {
     ERROR,
 }
 
+enum class AuthStatus {
+    RESTORING,
+    SIGNED_OUT,
+    SIGNED_IN,
+}
+
+data class AuthUser(
+    val id: String,
+    val email: String,
+    val username: String = "",
+)
+
 data class FrameProbe(
     val brightness: Double = 0.0,
     val motion: Double = 1.0,
@@ -30,20 +42,38 @@ data class RecognizedCard(
     val currency: String,
     val confidence: Double,
     val language: CardLanguage,
+    val source: String = "tcgdex",
+    val setId: String = "",
+    val rarity: String = "",
+    val imageHighUrl: String? = null,
 )
 
 data class SessionCard(
     val card: RecognizedCard,
     val quantity: Int = 1,
-)
+    val cloudId: String? = null,
+    val condition: String = "NM",
+    val finish: String = "normal",
+    val isFavorite: Boolean = false,
+) {
+    val collectionKey: String
+        get() = "${card.source}:${card.language.code}:${card.id}:$condition:$finish"
+}
 
 data class ScannerUiState(
+    val authStatus: AuthStatus = AuthStatus.RESTORING,
+    val authUser: AuthUser? = null,
+    val authBusy: Boolean = false,
+    val authMessage: String = "",
+    val isSyncing: Boolean = false,
+    val syncMessage: String = "",
     val language: CardLanguage = CardLanguage.JAPANESE,
     val phase: ScanPhase = ScanPhase.WAITING,
     val probe: FrameProbe = FrameProbe(),
     val currentMatch: RecognizedCard? = null,
     val candidates: List<RecognizedCard> = emptyList(),
     val sessionCards: List<SessionCard> = emptyList(),
+    val recentScanCards: List<SessionCard> = emptyList(),
     val favoriteCardIds: Set<String> = emptySet(),
     val statusMessage: String = "카드를 가이드 안에 맞춰 주세요",
     val isEndpointConfigured: Boolean = true,
@@ -55,7 +85,7 @@ data class ScannerUiState(
         get() = sessionCards.sumOf { (it.card.marketPrice ?: 0.0) * it.quantity }
 
     val favoriteCards: List<SessionCard>
-        get() = sessionCards.filter { it.card.id in favoriteCardIds }
+        get() = sessionCards.filter { it.collectionKey in favoriteCardIds }
 
     val displayCurrency: String
         get() = currentMatch?.currency

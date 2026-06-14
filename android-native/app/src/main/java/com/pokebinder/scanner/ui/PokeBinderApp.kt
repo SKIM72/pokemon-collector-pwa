@@ -5,6 +5,7 @@ package com.pokebinder.scanner.ui
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -33,12 +34,17 @@ import androidx.compose.material.icons.rounded.DarkMode
 import androidx.compose.material.icons.rounded.Favorite
 import androidx.compose.material.icons.rounded.FavoriteBorder
 import androidx.compose.material.icons.rounded.LightMode
+import androidx.compose.material.icons.rounded.Logout
+import androidx.compose.material.icons.rounded.Person
+import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.Remove
 import androidx.compose.material.icons.rounded.Search
+import androidx.compose.material.icons.rounded.Security
 import androidx.compose.material.icons.rounded.Settings
 import androidx.compose.material.icons.rounded.Smartphone
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Divider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -46,10 +52,12 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.NavigationBarItemDefaults
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -60,12 +68,16 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import com.pokebinder.scanner.BuildConfig
+import com.pokebinder.scanner.model.AuthStatus
 import com.pokebinder.scanner.model.CardLanguage
 import com.pokebinder.scanner.model.FrameProbe
 import com.pokebinder.scanner.model.RecognizedCard
@@ -103,6 +115,13 @@ fun PokeBinderApp(
     onQuantityChanged: (String, Int) -> Unit,
     onFavoriteToggle: (String) -> Unit,
     onClearSession: () -> Unit,
+    onSignIn: (String, String) -> Unit,
+    onSignUp: (String, String, String, String) -> Unit,
+    onPasswordReset: (String) -> Unit,
+    onRefreshCollection: () -> Unit,
+    onProfileUpdate: (String) -> Unit,
+    onPasswordUpdate: (String, String) -> Unit,
+    onSignOut: () -> Unit,
 ) {
     var destinationName by rememberSaveable {
         mutableStateOf(AppDestination.COLLECTION.name)
@@ -111,6 +130,26 @@ fun PokeBinderApp(
         mutableStateOf(AppDestination.COLLECTION.name)
     }
     val destination = AppDestination.valueOf(destinationName)
+
+    when (state.authStatus) {
+        AuthStatus.RESTORING -> {
+            AppLoadingScreen()
+            return
+        }
+        AuthStatus.SIGNED_OUT -> {
+            AuthScreen(
+                busy = state.authBusy,
+                message = state.authMessage,
+                configured = BuildConfig.SUPABASE_URL.isNotBlank() &&
+                    BuildConfig.SUPABASE_ANON_KEY.isNotBlank(),
+                onSignIn = onSignIn,
+                onSignUp = onSignUp,
+                onPasswordReset = onPasswordReset,
+            )
+            return
+        }
+        AuthStatus.SIGNED_IN -> Unit
+    }
 
     fun openDestination(next: AppDestination) {
         if (next == AppDestination.SCAN) {
@@ -141,7 +180,11 @@ fun PokeBinderApp(
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
         topBar = {
-            AppHeader(destination = destination)
+            AppHeader(
+                destination = destination,
+                userEmail = state.authUser?.email.orEmpty(),
+                isSyncing = state.isSyncing,
+            )
         },
         bottomBar = {
             AppBottomBar(
@@ -166,6 +209,7 @@ fun PokeBinderApp(
                 onScan = { openDestination(AppDestination.SCAN) },
                 onQuantityChanged = onQuantityChanged,
                 onFavoriteToggle = onFavoriteToggle,
+                onRefresh = onRefreshCollection,
                 modifier = Modifier.padding(padding),
             )
             AppDestination.FAVORITES -> CollectionScreen(
@@ -176,6 +220,7 @@ fun PokeBinderApp(
                 onScan = { openDestination(AppDestination.SCAN) },
                 onQuantityChanged = onQuantityChanged,
                 onFavoriteToggle = onFavoriteToggle,
+                onRefresh = onRefreshCollection,
                 modifier = Modifier.padding(padding),
             )
             AppDestination.SETTINGS -> SettingsScreen(
@@ -183,6 +228,10 @@ fun PokeBinderApp(
                 themeMode = themeMode,
                 onThemeModeChanged = onThemeModeChanged,
                 onLanguageSelected = onLanguageSelected,
+                onRefreshCollection = onRefreshCollection,
+                onProfileUpdate = onProfileUpdate,
+                onPasswordUpdate = onPasswordUpdate,
+                onSignOut = onSignOut,
                 modifier = Modifier.padding(padding),
             )
             AppDestination.SCAN -> Unit
@@ -191,7 +240,273 @@ fun PokeBinderApp(
 }
 
 @Composable
-private fun AppHeader(destination: AppDestination) {
+private fun AppLoadingScreen() {
+    Box(
+        contentAlignment = Alignment.Center,
+        modifier = Modifier
+            .fillMaxSize()
+            .background(MaterialTheme.colorScheme.background),
+    ) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Surface(
+                color = MaterialTheme.colorScheme.primary,
+                shape = RoundedCornerShape(18.dp),
+                modifier = Modifier.size(68.dp),
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    Text(
+                        text = "P",
+                        color = MaterialTheme.colorScheme.onPrimary,
+                        fontSize = 30.sp,
+                        fontWeight = FontWeight.Black,
+                    )
+                }
+            }
+            Spacer(modifier = Modifier.height(18.dp))
+            CircularProgressIndicator(
+                color = MaterialTheme.colorScheme.primary,
+                strokeWidth = 3.dp,
+                modifier = Modifier.size(28.dp),
+            )
+        }
+    }
+}
+
+@Composable
+private fun AuthScreen(
+    busy: Boolean,
+    message: String,
+    configured: Boolean,
+    onSignIn: (String, String) -> Unit,
+    onSignUp: (String, String, String, String) -> Unit,
+    onPasswordReset: (String) -> Unit,
+) {
+    var mode by rememberSaveable { mutableStateOf("login") }
+    var email by rememberSaveable { mutableStateOf("") }
+    var username by rememberSaveable { mutableStateOf("") }
+    var password by rememberSaveable { mutableStateOf("") }
+    var confirmPassword by rememberSaveable { mutableStateOf("") }
+
+    LazyColumn(
+        verticalArrangement = Arrangement.Center,
+        contentPadding = PaddingValues(horizontal = 22.dp, vertical = 28.dp),
+        modifier = Modifier
+            .fillMaxSize()
+            .background(MaterialTheme.colorScheme.background)
+            .statusBarsPadding()
+            .navigationBarsPadding(),
+    ) {
+        item {
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Surface(
+                    color = MaterialTheme.colorScheme.primary,
+                    shape = RoundedCornerShape(16.dp),
+                    modifier = Modifier.size(62.dp),
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Text(
+                            text = "P",
+                            color = MaterialTheme.colorScheme.onPrimary,
+                            fontSize = 28.sp,
+                            fontWeight = FontWeight.Black,
+                        )
+                    }
+                }
+                Spacer(modifier = Modifier.height(14.dp))
+                Text(
+                    text = "PokeBinder",
+                    color = MaterialTheme.colorScheme.onBackground,
+                    fontSize = 28.sp,
+                    fontWeight = FontWeight.Bold,
+                )
+                Text(
+                    text = when (mode) {
+                        "signup" -> "새 컬렉터 계정을 만드세요"
+                        "reset" -> "가입한 이메일로 재설정 링크를 보내드려요"
+                        else -> "내 카드 컬렉션에 로그인"
+                    },
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    fontSize = 14.sp,
+                )
+                Spacer(modifier = Modifier.height(26.dp))
+            }
+        }
+        item {
+            Surface(
+                color = MaterialTheme.colorScheme.surface,
+                shape = RoundedCornerShape(18.dp),
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Column(modifier = Modifier.padding(18.dp)) {
+                    Text(
+                        text = when (mode) {
+                            "signup" -> "계정 만들기"
+                            "reset" -> "비밀번호 재설정"
+                            else -> "로그인"
+                        },
+                        color = MaterialTheme.colorScheme.onSurface,
+                        fontSize = 21.sp,
+                        fontWeight = FontWeight.Bold,
+                    )
+                    Spacer(modifier = Modifier.height(18.dp))
+
+                    if (mode == "signup") {
+                        OutlinedTextField(
+                            value = username,
+                            onValueChange = { username = it },
+                            label = { Text("아이디") },
+                            singleLine = true,
+                            shape = RoundedCornerShape(12.dp),
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                        Spacer(modifier = Modifier.height(10.dp))
+                    }
+
+                    OutlinedTextField(
+                        value = email,
+                        onValueChange = { email = it },
+                        label = { Text("이메일") },
+                        keyboardOptions = KeyboardOptions(
+                            keyboardType = KeyboardType.Email,
+                            imeAction = if (mode == "reset") ImeAction.Done else ImeAction.Next,
+                        ),
+                        singleLine = true,
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+
+                    if (mode != "reset") {
+                        Spacer(modifier = Modifier.height(10.dp))
+                        OutlinedTextField(
+                            value = password,
+                            onValueChange = { password = it },
+                            label = { Text("비밀번호") },
+                            visualTransformation = PasswordVisualTransformation(),
+                            keyboardOptions = KeyboardOptions(
+                                keyboardType = KeyboardType.Password,
+                                imeAction = if (mode == "signup") ImeAction.Next else ImeAction.Done,
+                            ),
+                            singleLine = true,
+                            shape = RoundedCornerShape(12.dp),
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                    }
+
+                    if (mode == "signup") {
+                        Spacer(modifier = Modifier.height(10.dp))
+                        OutlinedTextField(
+                            value = confirmPassword,
+                            onValueChange = { confirmPassword = it },
+                            label = { Text("비밀번호 재확인") },
+                            visualTransformation = PasswordVisualTransformation(),
+                            keyboardOptions = KeyboardOptions(
+                                keyboardType = KeyboardType.Password,
+                                imeAction = ImeAction.Done,
+                            ),
+                            singleLine = true,
+                            shape = RoundedCornerShape(12.dp),
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                    }
+
+                    if (message.isNotBlank()) {
+                        Spacer(modifier = Modifier.height(12.dp))
+                        Text(
+                            text = message,
+                            color = if (message.contains("완료") || message.contains("보냈")) {
+                                MaterialTheme.colorScheme.primary
+                            } else {
+                                MaterialTheme.colorScheme.error
+                            },
+                            fontSize = 13.sp,
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.height(18.dp))
+                    Button(
+                        enabled = !busy && configured,
+                        onClick = {
+                            when (mode) {
+                                "signup" -> onSignUp(
+                                    email,
+                                    username,
+                                    password,
+                                    confirmPassword,
+                                )
+                                "reset" -> onPasswordReset(email)
+                                else -> onSignIn(email, password)
+                            }
+                        },
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(52.dp),
+                    ) {
+                        if (busy) {
+                            CircularProgressIndicator(
+                                color = MaterialTheme.colorScheme.onPrimary,
+                                strokeWidth = 2.dp,
+                                modifier = Modifier.size(20.dp),
+                            )
+                        } else {
+                            Text(
+                                text = when (mode) {
+                                    "signup" -> "계정 만들기"
+                                    "reset" -> "재설정 메일 보내기"
+                                    else -> "로그인"
+                                },
+                                fontWeight = FontWeight.Bold,
+                            )
+                        }
+                    }
+
+                    if (!configured) {
+                        Spacer(modifier = Modifier.height(10.dp))
+                        Text(
+                            text = "이 APK에 Supabase 연결 정보가 없습니다.",
+                            color = MaterialTheme.colorScheme.error,
+                            fontSize = 13.sp,
+                        )
+                    }
+
+                    if (mode == "login") {
+                        TextButton(
+                            onClick = { mode = "reset" },
+                            modifier = Modifier.align(Alignment.CenterHorizontally),
+                        ) {
+                            Text("비밀번호를 잊으셨나요?")
+                        }
+                        Divider(color = MaterialTheme.colorScheme.surfaceVariant)
+                        Spacer(modifier = Modifier.height(10.dp))
+                        OutlinedButton(
+                            onClick = { mode = "signup" },
+                            shape = RoundedCornerShape(12.dp),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(50.dp),
+                        ) {
+                            Text("새 계정 만들기")
+                        }
+                    } else {
+                        TextButton(
+                            onClick = { mode = "login" },
+                            modifier = Modifier.align(Alignment.CenterHorizontally),
+                        ) {
+                            Text("로그인으로 돌아가기")
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun AppHeader(
+    destination: AppDestination,
+    userEmail: String,
+    isSyncing: Boolean,
+) {
     Surface(
         color = MaterialTheme.colorScheme.background,
         modifier = Modifier.fillMaxWidth(),
@@ -225,7 +540,7 @@ private fun AppHeader(destination: AppDestination) {
                     fontSize = 22.sp,
                 )
                 Text(
-                    text = "PokeBinder",
+                    text = if (isSyncing) "Supabase 동기화 중" else "PokeBinder",
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     fontSize = 12.sp,
                 )
@@ -237,7 +552,7 @@ private fun AppHeader(destination: AppDestination) {
             ) {
                 Box(contentAlignment = Alignment.Center) {
                     Text(
-                        text = "K",
+                        text = userEmail.firstOrNull()?.uppercase() ?: "P",
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         fontWeight = FontWeight.Bold,
                     )
@@ -295,6 +610,7 @@ private fun CollectionScreen(
     onScan: () -> Unit,
     onQuantityChanged: (String, Int) -> Unit,
     onFavoriteToggle: (String) -> Unit,
+    onRefresh: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     LazyColumn(
@@ -320,10 +636,30 @@ private fun CollectionScreen(
                         fontSize = 20.sp,
                     )
                     Text(
-                        text = "${cards.sumOf { it.quantity }}장 · ${cards.size}종류",
+                        text = if (state.syncMessage.isNotBlank()) {
+                            state.syncMessage
+                        } else {
+                            "${cards.sumOf { it.quantity }}장 · ${cards.size}종류"
+                        },
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         fontSize = 13.sp,
                     )
+                }
+                IconButton(
+                    onClick = onRefresh,
+                    enabled = !state.isSyncing,
+                ) {
+                    if (state.isSyncing) {
+                        CircularProgressIndicator(
+                            strokeWidth = 2.dp,
+                            modifier = Modifier.size(19.dp),
+                        )
+                    } else {
+                        Icon(
+                            imageVector = Icons.Rounded.Refresh,
+                            contentDescription = "컬렉션 새로고침",
+                        )
+                    }
                 }
                 Button(
                     onClick = onScan,
@@ -348,10 +684,10 @@ private fun CollectionScreen(
                 )
             }
         } else {
-            items(cards, key = { it.card.id }) { item ->
+            items(cards, key = ::collectionKey) { item ->
                 CollectionCard(
                     item = item,
-                    isFavorite = item.card.id in state.favoriteCardIds,
+                    isFavorite = item.collectionKey in state.favoriteCardIds,
                     onQuantityChanged = onQuantityChanged,
                     onFavoriteToggle = onFavoriteToggle,
                 )
@@ -482,7 +818,7 @@ private fun CollectionCard(
                         )
                     }
                     IconButton(
-                        onClick = { onFavoriteToggle(item.card.id) },
+                        onClick = { onFavoriteToggle(item.collectionKey) },
                         modifier = Modifier.size(36.dp),
                     ) {
                         Icon(
@@ -520,7 +856,7 @@ private fun CollectionCard(
                         modifier = Modifier.fillMaxWidth(),
                     ) {
                         IconButton(
-                            onClick = { onQuantityChanged(item.card.id, -1) },
+                            onClick = { onQuantityChanged(item.collectionKey, -1) },
                             modifier = Modifier.size(38.dp),
                         ) {
                             Icon(
@@ -534,7 +870,7 @@ private fun CollectionCard(
                             fontWeight = FontWeight.Bold,
                         )
                         IconButton(
-                            onClick = { onQuantityChanged(item.card.id, 1) },
+                            onClick = { onQuantityChanged(item.collectionKey, 1) },
                             modifier = Modifier.size(38.dp),
                         ) {
                             Icon(
@@ -662,10 +998,10 @@ private fun SearchScreen(
                 )
             }
         } else {
-            items(results, key = { it.card.id }) { item ->
+            items(results, key = ::collectionKey) { item ->
                 CollectionCard(
                     item = item,
-                    isFavorite = item.card.id in state.favoriteCardIds,
+                    isFavorite = item.collectionKey in state.favoriteCardIds,
                     onQuantityChanged = onQuantityChanged,
                     onFavoriteToggle = onFavoriteToggle,
                 )
@@ -680,13 +1016,84 @@ private fun SettingsScreen(
     themeMode: ThemeMode,
     onThemeModeChanged: (ThemeMode) -> Unit,
     onLanguageSelected: (CardLanguage) -> Unit,
+    onRefreshCollection: () -> Unit,
+    onProfileUpdate: (String) -> Unit,
+    onPasswordUpdate: (String, String) -> Unit,
+    onSignOut: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    var username by rememberSaveable {
+        mutableStateOf(state.authUser?.username.orEmpty())
+    }
+    var password by rememberSaveable { mutableStateOf("") }
+    var confirmPassword by rememberSaveable { mutableStateOf("") }
+
     LazyColumn(
         verticalArrangement = Arrangement.spacedBy(12.dp),
         contentPadding = PaddingValues(horizontal = 18.dp, vertical = 10.dp),
         modifier = modifier.fillMaxSize(),
     ) {
+        item {
+            SettingsGroup(title = "마이페이지") {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Surface(
+                        color = MaterialTheme.colorScheme.primary,
+                        shape = CircleShape,
+                        modifier = Modifier.size(46.dp),
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Text(
+                                text = state.authUser?.email?.firstOrNull()?.uppercase() ?: "P",
+                                color = MaterialTheme.colorScheme.onPrimary,
+                                fontWeight = FontWeight.Bold,
+                            )
+                        }
+                    }
+                    Spacer(modifier = Modifier.width(12.dp))
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = state.authUser?.email.orEmpty(),
+                            color = MaterialTheme.colorScheme.onSurface,
+                            fontWeight = FontWeight.Bold,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                        Text(
+                            text = state.authUser?.id.orEmpty(),
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            fontSize = 11.sp,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                }
+                Spacer(modifier = Modifier.height(14.dp))
+                OutlinedTextField(
+                    value = username,
+                    onValueChange = { username = it },
+                    label = { Text("아이디") },
+                    singleLine = true,
+                    shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Spacer(modifier = Modifier.height(10.dp))
+                Button(
+                    onClick = { onProfileUpdate(username) },
+                    enabled = !state.authBusy,
+                ) {
+                    Icon(
+                        imageVector = Icons.Rounded.Person,
+                        contentDescription = null,
+                        modifier = Modifier.size(18.dp),
+                    )
+                    Spacer(modifier = Modifier.width(7.dp))
+                    Text("프로필 저장")
+                }
+            }
+        }
         item {
             SettingsGroup(title = "테마") {
                 Row(
@@ -729,6 +1136,88 @@ private fun SettingsScreen(
             }
         }
         item {
+            SettingsGroup(title = "비밀번호 변경") {
+                OutlinedTextField(
+                    value = password,
+                    onValueChange = { password = it },
+                    label = { Text("새 비밀번호") },
+                    visualTransformation = PasswordVisualTransformation(),
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                    singleLine = true,
+                    shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Spacer(modifier = Modifier.height(10.dp))
+                OutlinedTextField(
+                    value = confirmPassword,
+                    onValueChange = { confirmPassword = it },
+                    label = { Text("새 비밀번호 재확인") },
+                    visualTransformation = PasswordVisualTransformation(),
+                    keyboardOptions = KeyboardOptions(
+                        keyboardType = KeyboardType.Password,
+                        imeAction = ImeAction.Done,
+                    ),
+                    singleLine = true,
+                    shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Spacer(modifier = Modifier.height(10.dp))
+                Button(
+                    onClick = {
+                        onPasswordUpdate(password, confirmPassword)
+                        password = ""
+                        confirmPassword = ""
+                    },
+                    enabled = password.isNotBlank() && !state.authBusy,
+                ) {
+                    Icon(
+                        imageVector = Icons.Rounded.Security,
+                        contentDescription = null,
+                        modifier = Modifier.size(18.dp),
+                    )
+                    Spacer(modifier = Modifier.width(7.dp))
+                    Text("비밀번호 변경")
+                }
+            }
+        }
+        item {
+            SettingsGroup(title = "백업과 동기화") {
+                SettingsRow(
+                    label = "Supabase",
+                    value = if (state.isSyncing) "동기화 중" else state.syncMessage.ifBlank {
+                        "${state.sessionCards.size}종류 저장됨"
+                    },
+                    valueColor = if (state.syncMessage.contains("실패") ||
+                        state.syncMessage.contains("오류")
+                    ) {
+                        MaterialTheme.colorScheme.error
+                    } else {
+                        MaterialTheme.colorScheme.primary
+                    },
+                )
+                Button(
+                    onClick = onRefreshCollection,
+                    enabled = !state.isSyncing,
+                ) {
+                    if (state.isSyncing) {
+                        CircularProgressIndicator(
+                            color = MaterialTheme.colorScheme.onPrimary,
+                            strokeWidth = 2.dp,
+                            modifier = Modifier.size(18.dp),
+                        )
+                    } else {
+                        Icon(
+                            imageVector = Icons.Rounded.Refresh,
+                            contentDescription = null,
+                            modifier = Modifier.size(18.dp),
+                        )
+                    }
+                    Spacer(modifier = Modifier.width(7.dp))
+                    Text("지금 동기화")
+                }
+            }
+        }
+        item {
             SettingsGroup(title = "앱 정보") {
                 SettingsRow(label = "버전", value = BuildConfig.VERSION_NAME)
                 Divider(color = MaterialTheme.colorScheme.surfaceVariant)
@@ -741,6 +1230,40 @@ private fun SettingsScreen(
                         MaterialTheme.colorScheme.error
                     },
                 )
+            }
+        }
+        if (state.authMessage.isNotBlank()) {
+            item {
+                Text(
+                    text = state.authMessage,
+                    color = if (state.authMessage.contains("저장")) {
+                        MaterialTheme.colorScheme.primary
+                    } else {
+                        MaterialTheme.colorScheme.error
+                    },
+                    fontSize = 13.sp,
+                    modifier = Modifier.padding(horizontal = 4.dp),
+                )
+            }
+        }
+        item {
+            SettingsGroup(title = "세션") {
+                Button(
+                    onClick = onSignOut,
+                    enabled = !state.authBusy,
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.error,
+                        contentColor = Color.White,
+                    ),
+                ) {
+                    Icon(
+                        imageVector = Icons.Rounded.Logout,
+                        contentDescription = null,
+                        modifier = Modifier.size(18.dp),
+                    )
+                    Spacer(modifier = Modifier.width(7.dp))
+                    Text("로그아웃")
+                }
             }
         }
     }
@@ -851,3 +1374,5 @@ private fun formatMoney(value: Double, currency: String): String {
     }
     return "$symbol${formatter.format(value)}"
 }
+
+private fun collectionKey(item: SessionCard): String = item.collectionKey

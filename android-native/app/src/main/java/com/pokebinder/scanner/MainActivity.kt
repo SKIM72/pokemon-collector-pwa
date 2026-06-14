@@ -40,6 +40,13 @@ class MainActivity : ComponentActivity() {
                     onQuantityChanged = scannerViewModel::changeQuantity,
                     onFavoriteToggle = scannerViewModel::toggleFavorite,
                     onClearSession = scannerViewModel::clearSession,
+                    onSignIn = scannerViewModel::signIn,
+                    onSignUp = scannerViewModel::signUp,
+                    onPasswordReset = scannerViewModel::sendPasswordReset,
+                    onRefreshCollection = scannerViewModel::refreshCollection,
+                    onProfileUpdate = scannerViewModel::updateProfile,
+                    onPasswordUpdate = scannerViewModel::updatePassword,
+                    onSignOut = scannerViewModel::signOut,
                 )
             }
         }
