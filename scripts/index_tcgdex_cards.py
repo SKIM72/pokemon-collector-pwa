@@ -27,6 +27,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--start-page", type=int, default=1)
     parser.add_argument("--model", required=True)
     parser.add_argument("--dry-run", action="store_true")
+    parser.add_argument(
+        "--skip-existing",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+    )
     return parser.parse_args()
 
 
@@ -46,7 +51,15 @@ def main() -> int:
     )
     indexed = 0
     skipped = 0
+    skipped_existing = 0
     page = args.start_page
+    existing_ids = (
+        load_existing_ids(supabase_url, service_role_key, args.language)
+        if args.skip_existing and not args.dry_run
+        else set()
+    )
+    if existing_ids:
+        print(f"existing {args.language} embeddings: {len(existing_ids)}")
 
     with mp.tasks.vision.ImageEmbedder.create_from_options(options) as embedder:
         while indexed < args.limit:
@@ -66,6 +79,9 @@ def main() -> int:
                 if not summary.get("image"):
                     skipped += 1
                     continue
+                if summary.get("id") in existing_ids:
+                    skipped_existing += 1
+                    continue
 
                 try:
                     card = fetch_json(
@@ -83,6 +99,7 @@ def main() -> int:
                     else:
                         upsert_row(supabase_url, service_role_key, row)
                         print(f"[indexed] {row['external_id']} {row['name']}")
+                        existing_ids.add(row["external_id"])
                     indexed += 1
                 except Exception as error:  # Keep a long import moving.
                     if (
@@ -100,7 +117,11 @@ def main() -> int:
                 time.sleep(0.04)
             page += 1
 
-    print(f"complete: indexed={indexed}, skipped={skipped}, next_page={page}")
+    print(
+        "complete: "
+        f"indexed={indexed}, skipped={skipped}, "
+        f"skipped_existing={skipped_existing}, next_page={page}",
+    )
     return 0
 
 
@@ -145,7 +166,7 @@ def card_row(
     image: Image.Image,
 ) -> dict[str, Any]:
     set_data = card.get("set") or {}
-    currency = {"ja": "JPY", "ko": "KRW", "en": "USD"}[language]
+    price, currency, price_source = market_price(card, language)
     return {
         "source": "tcgdex",
         "external_id": card["id"],
@@ -157,7 +178,9 @@ def card_row(
         "rarity": card.get("rarity"),
         "image_url": image_url,
         "image_high_url": image_url,
+        "market_price": price,
         "currency": currency,
+        "price_source": price_source,
         "embedding": embedding,
         "perceptual_hash": difference_hash(image),
         "metadata": {
@@ -165,6 +188,27 @@ def card_row(
             "updated": card.get("updated"),
         },
     }
+
+
+def market_price(
+    card: dict[str, Any],
+    language: str,
+) -> tuple[float | None, str, str | None]:
+    pricing = card.get("pricing") or {}
+    tcgplayer = pricing.get("tcgplayer") or {}
+    if language == "en":
+        for finish in ("holofoil", "normal", "reverse-holofoil", "1st-edition-holofoil"):
+            values = tcgplayer.get(finish) or {}
+            value = values.get("marketPrice") or values.get("midPrice")
+            if value:
+                return float(value), "USD", "tcgplayer"
+
+    cardmarket = pricing.get("cardmarket") or {}
+    value = cardmarket.get("trend") or cardmarket.get("avg30") or cardmarket.get("avg")
+    if value:
+        return float(value), cardmarket.get("unit") or "EUR", "cardmarket"
+
+    return None, {"ja": "JPY", "ko": "KRW", "en": "USD"}[language], None
 
 
 def difference_hash(image: Image.Image) -> str:
@@ -192,6 +236,39 @@ def upsert_row(url: str, key: str, row: dict[str, Any]) -> None:
         timeout=45,
     )
     response.raise_for_status()
+
+
+def load_existing_ids(url: str, key: str, language: str) -> set[str]:
+    existing: set[str] = set()
+    page_size = 1000
+    offset = 0
+    while True:
+        response = requests.get(
+            f"{url}/rest/v1/card_reference_embeddings",
+            params={
+                "select": "external_id",
+                "source": "eq.tcgdex",
+                "language": f"eq.{language}",
+                "limit": str(page_size),
+                "offset": str(offset),
+            },
+            headers={
+                "Authorization": f"Bearer {key}",
+                "apikey": key,
+            },
+            timeout=45,
+        )
+        response.raise_for_status()
+        rows = response.json()
+        existing.update(
+            row["external_id"]
+            for row in rows
+            if row.get("external_id")
+        )
+        if len(rows) < page_size:
+            break
+        offset += page_size
+    return existing
 
 
 if __name__ == "__main__":

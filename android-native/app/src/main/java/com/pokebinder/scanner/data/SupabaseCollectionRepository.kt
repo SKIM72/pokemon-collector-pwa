@@ -153,7 +153,7 @@ class SupabaseCollectionRepository(
         .put("quantity", item.quantity)
         .put("market_price", item.card.marketPrice ?: 0.0)
         .put("currency", item.card.currency)
-        .put("price_source", item.card.source)
+        .put("price_source", item.card.priceSource)
         .put("raw", JSONObject())
         .put("is_favorite", isFavorite)
 
@@ -182,6 +182,7 @@ class SupabaseCollectionRepository(
                 marketPrice = json.optDouble("market_price")
                     .takeUnless { it.isNaN() || it <= 0.0 },
                 currency = json.optString("currency", defaultCurrency(language)),
+                priceSource = json.optString("price_source", "tcgdex"),
                 confidence = 1.0,
                 language = language,
                 source = json.optString("source", "tcgdex"),

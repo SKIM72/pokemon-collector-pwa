@@ -118,6 +118,9 @@ fun PokeBinderApp(
     onSignIn: (String, String) -> Unit,
     onSignUp: (String, String, String, String) -> Unit,
     onPasswordReset: (String) -> Unit,
+    onSearchLanguageSelected: (CardLanguage) -> Unit,
+    onSearchCards: (String) -> Unit,
+    onAddSearchCard: (RecognizedCard) -> Unit,
     onRefreshCollection: () -> Unit,
     onProfileUpdate: (String) -> Unit,
     onPasswordUpdate: (String, String) -> Unit,
@@ -196,9 +199,9 @@ fun PokeBinderApp(
         when (destination) {
             AppDestination.SEARCH -> SearchScreen(
                 state = state,
-                onScan = { openDestination(AppDestination.SCAN) },
-                onQuantityChanged = onQuantityChanged,
-                onFavoriteToggle = onFavoriteToggle,
+                onLanguageSelected = onSearchLanguageSelected,
+                onSearch = onSearchCards,
+                onAddCard = onAddSearchCard,
                 modifier = Modifier.padding(padding),
             )
             AppDestination.COLLECTION -> CollectionScreen(
@@ -936,25 +939,12 @@ private fun EmptyCollection(
 @Composable
 private fun SearchScreen(
     state: ScannerUiState,
-    onScan: () -> Unit,
-    onQuantityChanged: (String, Int) -> Unit,
-    onFavoriteToggle: (String) -> Unit,
+    onLanguageSelected: (CardLanguage) -> Unit,
+    onSearch: (String) -> Unit,
+    onAddCard: (RecognizedCard) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     var query by rememberSaveable { mutableStateOf("") }
-    val normalized = query.trim().lowercase(Locale.getDefault())
-    val results = if (normalized.isBlank()) {
-        state.sessionCards
-    } else {
-        state.sessionCards.filter { item ->
-            listOf(
-                item.card.name,
-                item.card.setName,
-                item.card.number,
-                item.card.id,
-            ).any { it.lowercase(Locale.getDefault()).contains(normalized) }
-        }
-    }
 
     LazyColumn(
         verticalArrangement = Arrangement.spacedBy(12.dp),
@@ -962,49 +952,193 @@ private fun SearchScreen(
         modifier = modifier.fillMaxSize(),
     ) {
         item {
-            OutlinedTextField(
-                value = query,
-                onValueChange = { query = it },
-                placeholder = { Text("카드 이름, 세트 또는 번호") },
-                leadingIcon = {
-                    Icon(
-                        imageVector = Icons.Rounded.Search,
-                        contentDescription = null,
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .horizontalScroll(rememberScrollState()),
+            ) {
+                listOf(
+                    CardLanguage.JAPANESE,
+                    CardLanguage.ENGLISH,
+                    CardLanguage.KOREAN,
+                ).forEach { language ->
+                    SelectChip(
+                        label = when (language) {
+                            CardLanguage.JAPANESE -> "일본판 메인"
+                            CardLanguage.ENGLISH -> "미국판"
+                            CardLanguage.KOREAN -> "한국판 베타"
+                        },
+                        selected = state.searchLanguage == language,
+                        onClick = { onLanguageSelected(language) },
                     )
-                },
-                singleLine = true,
-                shape = RoundedCornerShape(14.dp),
-                modifier = Modifier.fillMaxWidth(),
-            )
+                }
+            }
         }
         item {
-            Text(
-                text = if (normalized.isBlank()) "최근 등록 카드" else "검색 결과 ${results.size}건",
-                color = MaterialTheme.colorScheme.onBackground,
-                fontWeight = FontWeight.Bold,
-                fontSize = 18.sp,
-                modifier = Modifier.padding(top = 8.dp),
-            )
-        }
-        if (results.isEmpty()) {
-            item {
-                EmptyCollection(
-                    title = if (state.sessionCards.isEmpty()) {
-                        "스캔한 카드가 아직 없어요"
-                    } else {
-                        "일치하는 카드가 없어요"
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                OutlinedTextField(
+                    value = query,
+                    onValueChange = { query = it },
+                    placeholder = {
+                        Text(
+                            if (state.searchLanguage == CardLanguage.JAPANESE) {
+                                "리자몽, リザードン, Charizard"
+                            } else {
+                                "카드 이름 또는 번호"
+                            },
+                        )
                     },
-                    onScan = onScan,
+                    leadingIcon = {
+                        Icon(
+                            imageVector = Icons.Rounded.Search,
+                            contentDescription = null,
+                        )
+                    },
+                    keyboardOptions = KeyboardOptions(
+                        keyboardType = KeyboardType.Text,
+                        imeAction = ImeAction.Search,
+                    ),
+                    singleLine = true,
+                    shape = RoundedCornerShape(14.dp),
+                    modifier = Modifier.weight(1f),
+                )
+                Button(
+                    onClick = { onSearch(query) },
+                    enabled = query.isNotBlank() && !state.searchBusy,
+                    shape = RoundedCornerShape(13.dp),
+                    contentPadding = PaddingValues(horizontal = 15.dp),
+                    modifier = Modifier.height(56.dp),
+                ) {
+                    if (state.searchBusy) {
+                        CircularProgressIndicator(
+                            color = MaterialTheme.colorScheme.onPrimary,
+                            strokeWidth = 2.dp,
+                            modifier = Modifier.size(19.dp),
+                        )
+                    } else {
+                        Icon(
+                            imageVector = Icons.Rounded.Search,
+                            contentDescription = "검색",
+                        )
+                    }
+                }
+            }
+        }
+        item {
+            Column(modifier = Modifier.padding(top = 4.dp)) {
+                Text(
+                    text = "카드 데이터 검색",
+                    color = MaterialTheme.colorScheme.onBackground,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 18.sp,
+                )
+                Text(
+                    text = state.searchMessage,
+                    color = if (state.searchMessage.contains("실패")) {
+                        MaterialTheme.colorScheme.error
+                    } else {
+                        MaterialTheme.colorScheme.onSurfaceVariant
+                    },
+                    fontSize = 13.sp,
                 )
             }
+        }
+        if (state.searchResults.isEmpty()) {
+            item {
+                Surface(
+                    color = MaterialTheme.colorScheme.surface,
+                    shape = RoundedCornerShape(16.dp),
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Text(
+                        text = if (state.searchLanguage == CardLanguage.JAPANESE) {
+                            "일본판 카드가 기본입니다. 한국어·일본어·영어 이름으로 검색해 보세요."
+                        } else {
+                            "검색 결과가 여기에 표시됩니다."
+                        },
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(22.dp),
+                    )
+                }
+            }
         } else {
-            items(results, key = ::collectionKey) { item ->
-                CollectionCard(
-                    item = item,
-                    isFavorite = item.collectionKey in state.favoriteCardIds,
-                    onQuantityChanged = onQuantityChanged,
-                    onFavoriteToggle = onFavoriteToggle,
+            items(
+                state.searchResults,
+                key = { "${it.source}:${it.language.code}:${it.id}" },
+            ) { card ->
+                SearchResultCard(
+                    card = card,
+                    busy = state.searchBusy,
+                    onAdd = { onAddCard(card) },
                 )
+            }
+        }
+    }
+}
+
+@Composable
+private fun SearchResultCard(
+    card: RecognizedCard,
+    busy: Boolean,
+    onAdd: () -> Unit,
+) {
+    Surface(
+        color = MaterialTheme.colorScheme.surface,
+        shape = RoundedCornerShape(16.dp),
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.padding(12.dp),
+        ) {
+            AsyncImage(
+                model = card.imageUrl,
+                contentDescription = card.name,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier
+                    .size(width = 76.dp, height = 106.dp)
+                    .background(
+                        MaterialTheme.colorScheme.surfaceVariant,
+                        RoundedCornerShape(10.dp),
+                    ),
+            )
+            Spacer(modifier = Modifier.width(13.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = card.name,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 16.sp,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Text(
+                    text = "#${card.number} · ${card.id}",
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    fontSize = 12.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Spacer(modifier = Modifier.height(12.dp))
+                Button(
+                    onClick = onAdd,
+                    enabled = !busy,
+                    shape = RoundedCornerShape(10.dp),
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Icon(
+                        imageVector = Icons.Rounded.Add,
+                        contentDescription = null,
+                        modifier = Modifier.size(18.dp),
+                    )
+                    Spacer(modifier = Modifier.width(7.dp))
+                    Text("컬렉션에 추가")
+                }
             }
         }
     }

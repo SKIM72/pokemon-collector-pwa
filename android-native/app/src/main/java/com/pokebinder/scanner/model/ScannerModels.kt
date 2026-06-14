@@ -40,6 +40,7 @@ data class RecognizedCard(
     val imageUrl: String?,
     val marketPrice: Double?,
     val currency: String,
+    val priceSource: String = "tcgdex",
     val confidence: Double,
     val language: CardLanguage,
     val source: String = "tcgdex",
@@ -67,6 +68,10 @@ data class ScannerUiState(
     val authMessage: String = "",
     val isSyncing: Boolean = false,
     val syncMessage: String = "",
+    val searchLanguage: CardLanguage = CardLanguage.JAPANESE,
+    val searchResults: List<RecognizedCard> = emptyList(),
+    val searchBusy: Boolean = false,
+    val searchMessage: String = "일본판 카드를 우선 검색합니다",
     val language: CardLanguage = CardLanguage.JAPANESE,
     val phase: ScanPhase = ScanPhase.WAITING,
     val probe: FrameProbe = FrameProbe(),
@@ -82,7 +87,9 @@ data class ScannerUiState(
         get() = sessionCards.sumOf { it.quantity }
 
     val runningTotal: Double
-        get() = sessionCards.sumOf { (it.card.marketPrice ?: 0.0) * it.quantity }
+        get() = sessionCards
+            .filter { it.card.currency == displayCurrency }
+            .sumOf { (it.card.marketPrice ?: 0.0) * it.quantity }
 
     val favoriteCards: List<SessionCard>
         get() = sessionCards.filter { it.collectionKey in favoriteCardIds }

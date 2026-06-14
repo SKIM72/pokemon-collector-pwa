@@ -14,6 +14,10 @@ focuses on fast, continuous camera recognition.
 - Encrypted local authentication session storage
 - Shared collection synchronization with the React PWA
 - Automatic cloud quantity merge after a successful card scan
+- Japanese-first TCGdex search with Korean, Japanese, and English name aliases
+- English and Korean secondary search modes
+- TCGdex market metadata when it is available
+- `pokebinder://` deep link support from the hosted web app
 - 63:88 Pokemon card guide
 - Automatic scan when the center image is bright and stable
 - On-device MediaPipe MobileNetV3 image embedding
@@ -27,6 +31,20 @@ focuses on fast, continuous camera recognition.
 The collection is stored in the existing Supabase `collection_cards` table, so
 cards added from Android appear in the React PWA under the same account. Password
 reset emails currently return to the hosted PWA recovery flow.
+
+## Web To Android
+
+The Android manifest accepts:
+
+```text
+pokebinder://open/collection
+https://skim72.github.io/pokemon-collector-pwa/
+```
+
+The hosted React app makes a one-time Android intent handoff attempt. Verified
+HTTPS App Links additionally require `/.well-known/assetlinks.json` at the root
+of `skim72.github.io` or a future custom domain. A project Pages path cannot
+provide that domain-root file by itself.
 
 ## Open In Android Studio
 

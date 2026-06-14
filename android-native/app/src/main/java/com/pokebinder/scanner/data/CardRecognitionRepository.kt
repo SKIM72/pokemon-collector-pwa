@@ -130,6 +130,7 @@ class EdgeFunctionCardRecognitionRepository(
                         CardLanguage.ENGLISH -> "USD"
                     },
                 ),
+                priceSource = json.optString("priceSource", "tcgdex"),
                 confidence = json.optDouble("confidence", 0.0).coerceIn(0.0, 1.0),
                 language = language,
                 source = json.optString("source", "tcgdex"),

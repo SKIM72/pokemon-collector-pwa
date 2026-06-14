@@ -15,7 +15,7 @@ on:
       limit:
         description: Maximum cards to index
         required: true
-        default: "100"
+        default: "500"
       start_page:
         description: TCGdex start page
         required: true

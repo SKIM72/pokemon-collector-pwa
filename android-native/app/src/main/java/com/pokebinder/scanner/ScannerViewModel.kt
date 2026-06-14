@@ -9,6 +9,7 @@ import com.pokebinder.scanner.data.EdgeFunctionCardRecognitionRepository
 import com.pokebinder.scanner.data.SupabaseAuthRepository
 import com.pokebinder.scanner.data.SupabaseCollectionRepository
 import com.pokebinder.scanner.data.SupabaseSession
+import com.pokebinder.scanner.data.TcgDexRepository
 import com.pokebinder.scanner.model.AuthStatus
 import com.pokebinder.scanner.model.CardLanguage
 import com.pokebinder.scanner.model.FrameProbe
@@ -30,6 +31,7 @@ class ScannerViewModel(application: Application) : AndroidViewModel(application)
         EdgeFunctionCardRecognitionRepository(imageEmbedder)
     private val authRepository = SupabaseAuthRepository(application)
     private val collectionRepository = SupabaseCollectionRepository()
+    private val cardSearchRepository = TcgDexRepository()
 
     private val mutableState = MutableStateFlow(
         ScannerUiState(
@@ -127,6 +129,104 @@ class ScannerViewModel(application: Application) : AndroidViewModel(application)
         viewModelScope.launch {
             val session = activeSession() ?: return@launch
             loadCollection(session)
+        }
+    }
+
+    fun selectSearchLanguage(language: CardLanguage) {
+        mutableState.update {
+            it.copy(
+                searchLanguage = language,
+                searchResults = emptyList(),
+                searchMessage = when (language) {
+                    CardLanguage.JAPANESE -> "일본판 카드를 우선 검색합니다"
+                    CardLanguage.ENGLISH -> "영문판 카드를 검색합니다"
+                    CardLanguage.KOREAN -> "한국판 데이터는 아직 제한적입니다"
+                },
+            )
+        }
+    }
+
+    fun searchCards(query: String) {
+        val trimmed = query.trim()
+        if (trimmed.isBlank()) {
+            mutableState.update { it.copy(searchMessage = "검색어를 입력해 주세요") }
+            return
+        }
+        val language = mutableState.value.searchLanguage
+        viewModelScope.launch {
+            mutableState.update {
+                it.copy(
+                    searchBusy = true,
+                    searchResults = emptyList(),
+                    searchMessage = if (language == CardLanguage.JAPANESE) {
+                        "일본판 카드 검색 중"
+                    } else {
+                        "${language.label} 카드 검색 중"
+                    },
+                )
+            }
+            runCatching {
+                cardSearchRepository.search(trimmed, language)
+            }.onSuccess { cards ->
+                mutableState.update {
+                    it.copy(
+                        searchBusy = false,
+                        searchResults = cards,
+                        searchMessage = if (cards.isEmpty()) {
+                            "검색 결과가 없습니다"
+                        } else {
+                            "${cards.size}개 카드를 찾았습니다"
+                        },
+                    )
+                }
+            }.onFailure { error ->
+                mutableState.update {
+                    it.copy(
+                        searchBusy = false,
+                        searchMessage = error.message ?: "카드 검색에 실패했습니다",
+                    )
+                }
+            }
+        }
+    }
+
+    fun addSearchCard(card: RecognizedCard) {
+        viewModelScope.launch {
+            mutableState.update {
+                it.copy(searchBusy = true, searchMessage = "카드 상세 정보 확인 중")
+            }
+            runCatching {
+                cardSearchRepository.fetchCard(card)
+            }.onSuccess { detailed ->
+                mutableState.update { current ->
+                    current.copy(
+                        sessionCards = incrementCard(current.sessionCards, detailed),
+                        searchBusy = true,
+                        searchMessage = "Supabase에 저장 중",
+                    )
+                }
+                val saved = mutableState.value.sessionCards
+                    .firstOrNull { matchesRecognized(it, detailed) }
+                    ?.let { persistCard(it) }
+                    ?: false
+                mutableState.update {
+                    it.copy(
+                        searchBusy = false,
+                        searchMessage = if (saved) {
+                            "${detailed.name} 1장 추가됨"
+                        } else {
+                            "카드는 추가했지만 클라우드 저장에 실패했습니다"
+                        },
+                    )
+                }
+            }.onFailure { error ->
+                mutableState.update {
+                    it.copy(
+                        searchBusy = false,
+                        searchMessage = error.message ?: "카드 추가에 실패했습니다",
+                    )
+                }
+            }
         }
     }
 
@@ -499,9 +599,9 @@ class ScannerViewModel(application: Application) : AndroidViewModel(application)
         }
     }
 
-    private suspend fun persistCard(item: SessionCard) {
-        val session = activeSession() ?: return
-        runSync {
+    private suspend fun persistCard(item: SessionCard): Boolean {
+        val session = activeSession() ?: return false
+        return runSync {
             val saved = collectionRepository.saveExact(
                 session = session,
                 item = item,
@@ -520,22 +620,26 @@ class ScannerViewModel(application: Application) : AndroidViewModel(application)
         }
     }
 
-    private suspend fun runSync(block: suspend () -> Unit) {
+    private suspend fun runSync(block: suspend () -> Unit): Boolean {
         mutableState.update { it.copy(isSyncing = true, syncMessage = "Supabase 저장 중") }
-        runCatching { block() }
-            .onSuccess {
-                mutableState.update {
-                    it.copy(isSyncing = false, syncMessage = "동기화 완료")
-                }
-            }
-            .onFailure { error ->
-                mutableState.update {
-                    it.copy(
-                        isSyncing = false,
-                        syncMessage = error.message ?: "동기화에 실패했습니다.",
-                    )
-                }
-            }
+        return runCatching { block() }
+            .fold(
+                onSuccess = {
+                    mutableState.update {
+                        it.copy(isSyncing = false, syncMessage = "동기화 완료")
+                    }
+                    true
+                },
+                onFailure = { error ->
+                    mutableState.update {
+                        it.copy(
+                            isSyncing = false,
+                            syncMessage = error.message ?: "동기화에 실패했습니다.",
+                        )
+                    }
+                    false
+                },
+            )
     }
 
     private suspend fun activeSession(): SupabaseSession? {

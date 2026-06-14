@@ -60,6 +60,10 @@ function App() {
   const [passwordRecovery, setPasswordRecovery] = useState(false);
 
   useEffect(() => {
+    attemptAndroidAppHandoff();
+  }, []);
+
+  useEffect(() => {
     if (!hasSupabaseConfig) {
       setSessionLoading(false);
       return undefined;
@@ -1731,6 +1735,22 @@ function authSubtitle(mode) {
 
 function initialOf(email) {
   return String(email || "P").slice(0, 1).toUpperCase();
+}
+
+function attemptAndroidAppHandoff() {
+  const isAndroid = /Android/i.test(navigator.userAgent || "");
+  const isStandalone = window.matchMedia?.("(display-mode: standalone)")?.matches;
+  const params = new URLSearchParams(window.location.search);
+  const isHostedApp = window.location.hostname === "skim72.github.io";
+  if (!isAndroid || !isHostedApp || isStandalone || params.get("stayWeb") === "1") return;
+  if (sessionStorage.getItem("pokebinder.androidHandoff") === "attempted") return;
+
+  sessionStorage.setItem("pokebinder.androidHandoff", "attempted");
+  const intent =
+    "intent://open/collection#Intent;scheme=pokebinder;package=com.pokebinder.scanner;end";
+  window.setTimeout(() => {
+    window.location.href = intent;
+  }, 350);
 }
 
 function formatPercent(value) {
