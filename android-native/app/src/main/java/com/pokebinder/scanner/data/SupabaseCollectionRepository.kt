@@ -23,6 +23,44 @@ class SupabaseCollectionRepository(
         .readTimeout(25, TimeUnit.SECONDS)
         .build(),
 ) {
+    suspend fun loadDisplayCurrency(session: SupabaseSession): String =
+        withContext(Dispatchers.IO) {
+            val url = "${supabaseUrl.trimEnd('/')}/rest/v1/user_settings"
+                .toHttpUrl()
+                .newBuilder()
+                .addQueryParameter("select", "display_currency")
+                .addQueryParameter("user_id", "eq.${session.user.id}")
+                .addQueryParameter("limit", "1")
+                .build()
+            executeArray(
+                authorizedRequest(url.toString(), session).get().build(),
+            ).firstOrNull()
+                ?.optString("display_currency")
+                ?.takeIf { it in DISPLAY_CURRENCIES }
+                ?: "JPY"
+        }
+
+    suspend fun saveDisplayCurrency(
+        session: SupabaseSession,
+        currency: String,
+    ) = withContext(Dispatchers.IO) {
+        require(currency in DISPLAY_CURRENCIES)
+        val url = "${supabaseUrl.trimEnd('/')}/rest/v1/user_settings"
+            .toHttpUrl()
+            .newBuilder()
+            .addQueryParameter("on_conflict", "user_id")
+            .build()
+        val payload = JSONObject()
+            .put("user_id", session.user.id)
+            .put("display_currency", currency)
+        executeEmpty(
+            authorizedRequest(url.toString(), session)
+                .header("Prefer", "resolution=merge-duplicates,return=minimal")
+                .post(payload.toString().toRequestBody(JSON_MEDIA_TYPE))
+                .build(),
+        )
+    }
+
     suspend fun loadCollection(session: SupabaseSession): List<SessionCard> =
         withContext(Dispatchers.IO) {
             val url = "${supabaseUrl.trimEnd('/')}/rest/v1/collection_cards"
@@ -149,15 +187,22 @@ class SupabaseCollectionRepository(
         .put("set_name", item.card.setName)
         .put("card_number", item.card.number)
         .put("rarity", item.card.rarity.takeIf { it.isNotBlank() })
-        .put("image_url", item.card.imageUrl)
-        .put("image_high_url", item.card.imageHighUrl ?: item.card.imageUrl)
+        .put("image_url", cloudSafeUrl(item.card.imageUrl))
+        .put(
+            "image_high_url",
+            cloudSafeUrl(item.card.imageHighUrl ?: item.card.imageUrl),
+        )
         .put("condition", item.condition)
         .put("finish", item.finish)
         .put("quantity", item.quantity)
         .put("market_price", item.card.marketPrice ?: 0.0)
         .put("currency", item.card.currency)
         .put("price_source", item.card.priceSource)
-        .put("raw", JSONObject())
+        .put(
+            "raw",
+            JSONObject()
+                .put("releaseDate", item.card.releaseDate),
+        )
         .put("is_favorite", isFavorite)
 
     private fun parseCard(json: JSONObject): SessionCard? {
@@ -176,6 +221,7 @@ class SupabaseCollectionRepository(
             condition = json.optString("condition", "NM"),
             finish = json.optString("finish", "normal"),
             isFavorite = json.optBoolean("is_favorite", false),
+            addedAt = json.optString("created_at"),
             card = RecognizedCard(
                 id = externalId,
                 name = name,
@@ -192,6 +238,9 @@ class SupabaseCollectionRepository(
                 setId = json.optString("set_id"),
                 rarity = json.optString("rarity"),
                 imageHighUrl = json.optString("image_high_url").takeIf { it.isNotBlank() },
+                releaseDate = json.optJSONObject("raw")
+                    ?.optString("releaseDate")
+                    .orEmpty(),
             ),
         )
     }
@@ -204,8 +253,12 @@ class SupabaseCollectionRepository(
     }.getOrDefault("")
         .ifBlank { "Supabase 동기화 오류 ($code)" }
 
+    private fun cloudSafeUrl(value: String?): String? =
+        value?.takeUnless { it.startsWith("file:") }
+
     private companion object {
         val JSON_MEDIA_TYPE = "application/json; charset=utf-8".toMediaType()
+        val DISPLAY_CURRENCIES = setOf("JPY", "KRW", "USD")
 
         fun defaultCurrency(language: CardLanguage): String = when (language) {
             CardLanguage.JAPANESE -> "JPY"

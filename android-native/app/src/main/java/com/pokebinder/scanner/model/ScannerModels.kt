@@ -1,5 +1,8 @@
 package com.pokebinder.scanner.model
 
+import java.text.Collator
+import java.util.Locale
+
 enum class CardLanguage(val code: String, val label: String) {
     JAPANESE("ja", "일본판"),
     KOREAN("ko", "한국판"),
@@ -18,6 +21,24 @@ enum class AuthStatus {
     RESTORING,
     SIGNED_OUT,
     SIGNED_IN,
+}
+
+enum class SortDirection(val label: String) {
+    ASCENDING("오름차순"),
+    DESCENDING("내림차순"),
+}
+
+enum class SearchSortField(val label: String) {
+    RELEASE_DATE("출시일"),
+    NAME("이름"),
+    PRICE("금액"),
+}
+
+enum class CollectionSortField(val label: String) {
+    RELEASE_DATE("출시일"),
+    ADDED_DATE("추가일"),
+    NAME("이름"),
+    PRICE("금액"),
 }
 
 data class AuthUser(
@@ -65,6 +86,7 @@ data class RecognizedCard(
     val setId: String = "",
     val rarity: String = "",
     val imageHighUrl: String? = null,
+    val releaseDate: String = "",
 )
 
 data class SessionCard(
@@ -74,6 +96,7 @@ data class SessionCard(
     val condition: String = "NM",
     val finish: String = "normal",
     val isFavorite: Boolean = false,
+    val addedAt: String = "",
 ) {
     val collectionKey: String
         get() = "${card.source}:${card.language.code}:${card.id}:$condition:$finish"
@@ -86,10 +109,13 @@ data class ScannerUiState(
     val authMessage: String = "",
     val isSyncing: Boolean = false,
     val syncMessage: String = "",
-    val searchLanguage: CardLanguage = CardLanguage.JAPANESE,
     val searchResults: List<RecognizedCard> = emptyList(),
     val searchBusy: Boolean = false,
-    val searchMessage: String = "일본판 카드를 우선 검색합니다",
+    val searchMessage: String = "한 번에 일본판·영문판·한국판을 검색합니다",
+    val searchSortField: SearchSortField = SearchSortField.RELEASE_DATE,
+    val searchSortDirection: SortDirection = SortDirection.DESCENDING,
+    val collectionSortField: CollectionSortField = CollectionSortField.ADDED_DATE,
+    val collectionSortDirection: SortDirection = SortDirection.DESCENDING,
     val language: CardLanguage = CardLanguage.JAPANESE,
     val phase: ScanPhase = ScanPhase.WAITING,
     val probe: FrameProbe = FrameProbe(),
@@ -100,26 +126,106 @@ data class ScannerUiState(
     val favoriteCardIds: Set<String> = emptySet(),
     val statusMessage: String = "화면 안에 카드를 보여 주세요",
     val isEndpointConfigured: Boolean = true,
+    val scanAwaitingConfirmation: Boolean = false,
+    val scanAdded: Boolean = false,
+    val scanSaving: Boolean = false,
+    val displayCurrency: String = "JPY",
+    val currencyRates: Map<String, Double> = DEFAULT_CURRENCY_RATES,
 ) {
     val totalCards: Int
         get() = sessionCards.sumOf { it.quantity }
 
     val runningTotal: Double
         get() = sessionCards
-            .filter { it.card.currency == displayCurrency }
-            .sumOf { (it.card.marketPrice ?: 0.0) * it.quantity }
+            .sumOf { convertedPrice(it.card) * it.quantity }
 
     val favoriteCards: List<SessionCard>
         get() = sessionCards.filter { it.collectionKey in favoriteCardIds }
 
-    val displayCurrency: String
-        get() = currentMatch?.currency
-            ?: sessionCards.firstOrNull { it.card.marketPrice != null }?.card?.currency
-            ?: when (language) {
-                CardLanguage.JAPANESE -> "JPY"
-                CardLanguage.KOREAN -> "KRW"
-                CardLanguage.ENGLISH -> "USD"
+    val sortedSearchResults: List<RecognizedCard>
+        get() = searchResults.sortedWith(searchComparator())
+
+    val sortedSessionCards: List<SessionCard>
+        get() = sessionCards.sortedWith(collectionComparator())
+
+    val sortedFavoriteCards: List<SessionCard>
+        get() = favoriteCards.sortedWith(collectionComparator())
+
+    fun convertedPrice(card: RecognizedCard): Double = convertMoney(
+        value = card.marketPrice ?: 0.0,
+        fromCurrency = card.currency,
+        toCurrency = displayCurrency,
+        rates = currencyRates,
+    )
+
+    private fun searchComparator(): Comparator<RecognizedCard> {
+        val valueComparator = when (searchSortField) {
+            SearchSortField.RELEASE_DATE -> compareBy<RecognizedCard> { it.releaseDate }
+            SearchSortField.NAME -> Comparator { first, second ->
+                NAME_COLLATOR.compare(first.name, second.name)
             }
+            SearchSortField.PRICE -> compareBy { convertedPrice(it) }
+        }
+        val directed = if (searchSortDirection == SortDirection.ASCENDING) {
+            valueComparator
+        } else {
+            valueComparator.reversed()
+        }
+        return compareBy<RecognizedCard> {
+            when (searchSortField) {
+                SearchSortField.RELEASE_DATE -> it.releaseDate.isBlank()
+                SearchSortField.NAME -> false
+                SearchSortField.PRICE -> it.marketPrice == null
+            }
+        }.then(directed)
+    }
+
+    private fun collectionComparator(): Comparator<SessionCard> {
+        val valueComparator = when (collectionSortField) {
+            CollectionSortField.RELEASE_DATE -> compareBy<SessionCard> { it.card.releaseDate }
+            CollectionSortField.ADDED_DATE -> compareBy { it.addedAt }
+            CollectionSortField.NAME -> Comparator { first, second ->
+                NAME_COLLATOR.compare(first.card.name, second.card.name)
+            }
+            CollectionSortField.PRICE -> compareBy { convertedPrice(it.card) }
+        }
+        val directed = if (collectionSortDirection == SortDirection.ASCENDING) {
+            valueComparator
+        } else {
+            valueComparator.reversed()
+        }
+        return compareBy<SessionCard> {
+            when (collectionSortField) {
+                CollectionSortField.RELEASE_DATE -> it.card.releaseDate.isBlank()
+                CollectionSortField.ADDED_DATE -> it.addedAt.isBlank()
+                CollectionSortField.NAME -> false
+                CollectionSortField.PRICE -> it.card.marketPrice == null
+            }
+        }.then(directed)
+    }
+
+    private companion object {
+        val NAME_COLLATOR: Collator = Collator.getInstance(Locale.KOREAN)
+    }
+}
+
+val DEFAULT_CURRENCY_RATES = mapOf(
+    "USD" to 1.0,
+    "JPY" to 157.0,
+    "KRW" to 1_380.0,
+    "EUR" to 0.92,
+)
+
+fun convertMoney(
+    value: Double,
+    fromCurrency: String,
+    toCurrency: String,
+    rates: Map<String, Double>,
+): Double {
+    if (value <= 0.0 || fromCurrency == toCurrency) return value
+    val fromRate = rates[fromCurrency] ?: DEFAULT_CURRENCY_RATES[fromCurrency] ?: 1.0
+    val toRate = rates[toCurrency] ?: DEFAULT_CURRENCY_RATES[toCurrency] ?: 1.0
+    return value / fromRate * toRate
 }
 
 sealed interface RecognitionOutcome {

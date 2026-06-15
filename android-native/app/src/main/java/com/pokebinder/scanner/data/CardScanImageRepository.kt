@@ -1,5 +1,7 @@
 package com.pokebinder.scanner.data
 
+import android.content.Context
+import android.net.Uri
 import com.pokebinder.scanner.BuildConfig
 import com.pokebinder.scanner.model.RecognizedCard
 import kotlinx.coroutines.Dispatchers
@@ -9,9 +11,11 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONObject
+import java.io.File
 import java.util.concurrent.TimeUnit
 
 class CardScanImageRepository(
+    context: Context,
     private val supabaseUrl: String = BuildConfig.SUPABASE_URL,
     private val anonKey: String = BuildConfig.SUPABASE_ANON_KEY,
     private val client: OkHttpClient = OkHttpClient.Builder()
@@ -19,6 +23,20 @@ class CardScanImageRepository(
         .readTimeout(30, TimeUnit.SECONDS)
         .build(),
 ) {
+    private val imageDirectory = File(context.filesDir, "card-scans").apply { mkdirs() }
+
+    fun saveLocal(
+        card: RecognizedCard,
+        jpegBytes: ByteArray,
+    ): String {
+        val file = localFile(card)
+        file.writeBytes(jpegBytes)
+        return Uri.fromFile(file).toString()
+    }
+
+    fun localImageUrl(card: RecognizedCard): String? =
+        localFile(card).takeIf(File::exists)?.let(Uri::fromFile)?.toString()
+
     suspend fun upload(
         session: SupabaseSession,
         card: RecognizedCard,
@@ -85,6 +103,11 @@ class CardScanImageRepository(
         .replace(Regex("""[^a-z0-9._-]+"""), "-")
         .trim('-')
         .ifBlank { "card" }
+
+    private fun localFile(card: RecognizedCard): File = File(
+        imageDirectory,
+        "${card.language.code}-${safeSegment(card.source)}-${safeSegment(card.id)}.jpg",
+    )
 
     private companion object {
         const val BUCKET = "card-scans"

@@ -25,7 +25,7 @@ fun CardArtwork(
     contentScale: ContentScale = ContentScale.Fit,
 ) {
     SubcomposeAsyncImage(
-        model = card.imageHighUrl ?: card.imageUrl,
+        model = card.imageUrl ?: card.imageHighUrl,
         contentDescription = contentDescription,
         contentScale = contentScale,
         loading = {

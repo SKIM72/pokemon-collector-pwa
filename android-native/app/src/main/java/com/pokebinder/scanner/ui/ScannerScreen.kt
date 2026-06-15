@@ -28,6 +28,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.DeleteSweep
+import androidx.compose.material.icons.rounded.FlashOff
+import androidx.compose.material.icons.rounded.FlashOn
 import androidx.compose.material.icons.rounded.Remove
 import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material3.Button
@@ -63,6 +65,7 @@ import com.pokebinder.scanner.model.RecognizedCard
 import com.pokebinder.scanner.model.ScanPhase
 import com.pokebinder.scanner.model.ScannerUiState
 import com.pokebinder.scanner.model.SessionCard
+import kotlinx.coroutines.delay
 import java.text.NumberFormat
 import java.util.Locale
 
@@ -73,6 +76,8 @@ fun ScannerScreen(
     onFrameProbe: (com.pokebinder.scanner.model.FrameProbe) -> Unit,
     onStableFrame: (ByteArray) -> Unit,
     onCandidateSelected: (RecognizedCard) -> Unit,
+    onConfirmScan: () -> Unit,
+    onNextScan: () -> Unit,
     onQuantityChanged: (String, Int) -> Unit,
     onClearSession: () -> Unit,
     onClose: () -> Unit,
@@ -87,9 +92,18 @@ fun ScannerScreen(
     val permissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission(),
     ) { granted -> hasCameraPermission = granted }
+    var torchEnabled by remember { mutableStateOf(false) }
+    var torchAvailable by remember { mutableStateOf(false) }
+    var focusPoint by remember { mutableStateOf<Offset?>(null) }
 
     LaunchedEffect(Unit) {
         if (!hasCameraPermission) permissionLauncher.launch(Manifest.permission.CAMERA)
+    }
+    LaunchedEffect(focusPoint) {
+        if (focusPoint != null) {
+            delay(1_200)
+            focusPoint = null
+        }
     }
 
     Box(
@@ -101,6 +115,12 @@ fun ScannerScreen(
             CameraPreview(
                 onProbe = onFrameProbe,
                 onStableFrame = onStableFrame,
+                torchEnabled = torchEnabled,
+                onTorchAvailabilityChanged = {
+                    torchAvailable = it
+                    if (!it) torchEnabled = false
+                },
+                onFocusPointChanged = { focusPoint = it },
             )
         } else {
             PermissionPrompt(
@@ -115,6 +135,9 @@ fun ScannerScreen(
         ScannerTopBar(
             state = state,
             onLanguageSelected = onLanguageSelected,
+            torchAvailable = torchAvailable,
+            torchEnabled = torchEnabled,
+            onTorchToggle = { torchEnabled = !torchEnabled },
             onClose = onClose,
         )
 
@@ -123,11 +146,17 @@ fun ScannerScreen(
             phase = state.phase,
             modifier = Modifier.fillMaxSize(),
         )
+        focusPoint?.let { point ->
+            FocusIndicator(
+                point = point,
+                modifier = Modifier.fillMaxSize(),
+            )
+        }
 
-        state.currentMatch?.marketPrice?.let { price ->
+        state.currentMatch?.marketPrice?.let {
             PriceBadge(
-                price = price,
-                currency = state.currentMatch.currency,
+                price = state.convertedPrice(state.currentMatch),
+                currency = state.displayCurrency,
                 modifier = Modifier
                     .align(Alignment.CenterEnd)
                     .padding(end = 14.dp, bottom = 120.dp),
@@ -137,6 +166,8 @@ fun ScannerScreen(
         ScannerBottomPanel(
             state = state,
             onCandidateSelected = onCandidateSelected,
+            onConfirmScan = onConfirmScan,
+            onNextScan = onNextScan,
             onQuantityChanged = onQuantityChanged,
             onClearSession = onClearSession,
             modifier = Modifier.align(Alignment.BottomCenter),
@@ -148,6 +179,9 @@ fun ScannerScreen(
 private fun ScannerTopBar(
     state: ScannerUiState,
     onLanguageSelected: (CardLanguage) -> Unit,
+    torchAvailable: Boolean,
+    torchEnabled: Boolean,
+    onTorchToggle: () -> Unit,
     onClose: () -> Unit,
 ) {
     Column(
@@ -196,6 +230,30 @@ private fun ScannerTopBar(
             }
             Spacer(modifier = Modifier.width(8.dp))
             Surface(
+                color = Color(0xDD1B222B),
+                shape = CircleShape,
+            ) {
+                IconButton(
+                    onClick = onTorchToggle,
+                    enabled = torchAvailable,
+                ) {
+                    Icon(
+                        imageVector = if (torchEnabled) {
+                            Icons.Rounded.FlashOn
+                        } else {
+                            Icons.Rounded.FlashOff
+                        },
+                        contentDescription = if (torchEnabled) "플래시 끄기" else "플래시 켜기",
+                        tint = if (torchAvailable) {
+                            if (torchEnabled) MaterialTheme.colorScheme.primary else Color.White
+                        } else {
+                            Color(0xFF59616B)
+                        },
+                    )
+                }
+            }
+            Spacer(modifier = Modifier.width(8.dp))
+            Surface(
                 color = Color(0xEEEDF1F4),
                 shape = CircleShape,
             ) {
@@ -235,6 +293,27 @@ private fun ScannerTopBar(
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun FocusIndicator(
+    point: Offset,
+    modifier: Modifier = Modifier,
+) {
+    val primary = MaterialTheme.colorScheme.primary
+    Canvas(modifier = modifier) {
+        drawCircle(
+            color = Color.White,
+            radius = 26.dp.toPx(),
+            center = point,
+            style = Stroke(width = 2.dp.toPx()),
+        )
+        drawCircle(
+            color = primary,
+            radius = 4.dp.toPx(),
+            center = point,
+        )
     }
 }
 
@@ -290,6 +369,8 @@ private fun DetectedCardOverlay(
 private fun ScannerBottomPanel(
     state: ScannerUiState,
     onCandidateSelected: (RecognizedCard) -> Unit,
+    onConfirmScan: () -> Unit,
+    onNextScan: () -> Unit,
     onQuantityChanged: (String, Int) -> Unit,
     onClearSession: () -> Unit,
     modifier: Modifier = Modifier,
@@ -383,18 +464,54 @@ private fun ScannerBottomPanel(
                         Column(horizontalAlignment = Alignment.End) {
                             Text(
                                 text = card.marketPrice?.let {
-                                    formatMoney(it, card.currency)
+                                    formatMoney(
+                                        state.convertedPrice(card),
+                                        state.displayCurrency,
+                                    )
                                 } ?: "가격 확인 중",
                                 color = Color.White,
                                 fontWeight = FontWeight.Bold,
                                 fontSize = 16.sp,
                             )
                             Text(
-                                text = card.currency,
+                                text = state.displayCurrency,
                                 color = Color(0xFF85909D),
                                 fontSize = 11.sp,
                             )
                         }
+                    }
+                }
+            }
+
+            if (state.scanAwaitingConfirmation || state.scanAdded) {
+                Spacer(modifier = Modifier.height(12.dp))
+                Button(
+                    onClick = if (state.scanAdded) onNextScan else onConfirmScan,
+                    enabled = !state.scanSaving,
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.primary,
+                        contentColor = MaterialTheme.colorScheme.onPrimary,
+                    ),
+                    shape = RoundedCornerShape(13.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(50.dp),
+                ) {
+                    if (state.scanSaving) {
+                        CircularProgressIndicator(
+                            color = MaterialTheme.colorScheme.onPrimary,
+                            strokeWidth = 2.dp,
+                            modifier = Modifier.size(20.dp),
+                        )
+                    } else {
+                        Text(
+                            text = if (state.scanAdded) {
+                                "다음 카드 스캔"
+                            } else {
+                                "컬렉션에 1장 추가"
+                            },
+                            fontWeight = FontWeight.Bold,
+                        )
                     }
                 }
             }

@@ -14,6 +14,7 @@ import okhttp3.Request
 import org.json.JSONArray
 import org.json.JSONObject
 import java.util.Locale
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit
 
 class TcgDexRepository(
@@ -22,6 +23,25 @@ class TcgDexRepository(
         .readTimeout(25, TimeUnit.SECONDS)
         .build(),
 ) {
+    private val setReleaseDates = ConcurrentHashMap<String, String>()
+
+    suspend fun searchAllLanguages(query: String): List<RecognizedCard> =
+        withContext(Dispatchers.IO) {
+            val summaries = coroutineScope {
+                CardLanguage.values().map { language ->
+                    async { search(query, language).take(16) }
+                }.awaitAll().flatten()
+            }.distinctBy { "${it.source}:${it.language.code}:${it.id}" }
+
+            summaries.chunked(6).flatMap { chunk ->
+                coroutineScope {
+                    chunk.map { card ->
+                        async { runCatching { fetchCard(card) }.getOrDefault(card) }
+                    }.awaitAll()
+                }
+            }
+        }
+
     suspend fun search(
         query: String,
         language: CardLanguage,
@@ -52,11 +72,19 @@ class TcgDexRepository(
                 if (!response.isSuccessful) return@withContext card
                 val body = response.body?.string().orEmpty()
                 if (body.isBlank()) return@withContext card
-                val parsed = parseDetailed(JSONObject(body), card.language)
+                val json = JSONObject(body)
+                val parsed = parseDetailed(json, card.language)
+                val setId = parsed?.setId.orEmpty()
+                val releaseDate = if (setId.isBlank()) {
+                    card.releaseDate
+                } else {
+                    fetchSetReleaseDate(setId, card.language)
+                }
                 parsed?.copy(
                     confidence = card.confidence,
                     imageUrl = parsed.imageUrl ?: card.imageUrl,
                     imageHighUrl = parsed.imageHighUrl ?: card.imageHighUrl,
+                    releaseDate = releaseDate,
                 )
                     ?: card
             }
@@ -173,6 +201,7 @@ class TcgDexRepository(
             language = language,
             source = "tcgdex",
             imageHighUrl = image?.let { "$it/high.webp" },
+            releaseDate = "",
         )
     }
 
@@ -218,6 +247,25 @@ class TcgDexRepository(
         return value?.let {
             MarketPrice(it, cardmarket.optString("unit", "EUR"), "cardmarket")
         }
+    }
+
+    private fun fetchSetReleaseDate(
+        setId: String,
+        language: CardLanguage,
+    ): String {
+        val key = "${language.code}:$setId"
+        setReleaseDates[key]?.let { return it }
+        val request = Request.Builder()
+            .url("$API/${language.code}/sets/$setId")
+            .get()
+            .build()
+        val value = client.newCall(request).execute().use { response ->
+            if (!response.isSuccessful) return@use ""
+            val body = response.body?.string().orEmpty()
+            if (body.isBlank()) "" else JSONObject(body).optString("releaseDate")
+        }
+        setReleaseDates[key] = value
+        return value
     }
 
     private companion object {

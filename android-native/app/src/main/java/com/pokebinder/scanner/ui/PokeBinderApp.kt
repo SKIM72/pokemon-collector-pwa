@@ -29,6 +29,8 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Add
+import androidx.compose.material.icons.rounded.ArrowDownward
+import androidx.compose.material.icons.rounded.ArrowUpward
 import androidx.compose.material.icons.rounded.CameraAlt
 import androidx.compose.material.icons.rounded.CollectionsBookmark
 import androidx.compose.material.icons.rounded.DarkMode
@@ -82,10 +84,13 @@ import com.pokebinder.scanner.BuildConfig
 import com.pokebinder.scanner.R
 import com.pokebinder.scanner.model.AuthStatus
 import com.pokebinder.scanner.model.CardLanguage
+import com.pokebinder.scanner.model.CollectionSortField
 import com.pokebinder.scanner.model.FrameProbe
 import com.pokebinder.scanner.model.RecognizedCard
+import com.pokebinder.scanner.model.SearchSortField
 import com.pokebinder.scanner.model.ScannerUiState
 import com.pokebinder.scanner.model.SessionCard
+import com.pokebinder.scanner.model.SortDirection
 import java.text.NumberFormat
 import java.util.Locale
 
@@ -115,15 +120,21 @@ fun PokeBinderApp(
     onFrameProbe: (FrameProbe) -> Unit,
     onStableFrame: (ByteArray) -> Unit,
     onCandidateSelected: (RecognizedCard) -> Unit,
+    onConfirmScan: () -> Unit,
+    onNextScan: () -> Unit,
     onQuantityChanged: (String, Int) -> Unit,
     onFavoriteToggle: (String) -> Unit,
     onClearSession: () -> Unit,
     onSignIn: (String, String) -> Unit,
     onSignUp: (String, String, String, String) -> Unit,
     onPasswordReset: (String) -> Unit,
-    onSearchLanguageSelected: (CardLanguage) -> Unit,
     onSearchCards: (String) -> Unit,
     onAddSearchCard: (RecognizedCard) -> Unit,
+    onSearchSortFieldChanged: (SearchSortField) -> Unit,
+    onSearchSortDirectionToggle: () -> Unit,
+    onCollectionSortFieldChanged: (CollectionSortField) -> Unit,
+    onCollectionSortDirectionToggle: () -> Unit,
+    onDisplayCurrencyChanged: (String) -> Unit,
     onRefreshCollection: () -> Unit,
     onProfileUpdate: (String) -> Unit,
     onPasswordUpdate: (String, String) -> Unit,
@@ -176,6 +187,8 @@ fun PokeBinderApp(
             onFrameProbe = onFrameProbe,
             onStableFrame = onStableFrame,
             onCandidateSelected = onCandidateSelected,
+            onConfirmScan = onConfirmScan,
+            onNextScan = onNextScan,
             onQuantityChanged = onQuantityChanged,
             onClearSession = onClearSession,
             onClose = ::closeScanner,
@@ -202,31 +215,36 @@ fun PokeBinderApp(
         when (destination) {
             AppDestination.SEARCH -> SearchScreen(
                 state = state,
-                onLanguageSelected = onSearchLanguageSelected,
                 onSearch = onSearchCards,
                 onAddCard = onAddSearchCard,
+                onSortFieldChanged = onSearchSortFieldChanged,
+                onSortDirectionToggle = onSearchSortDirectionToggle,
                 modifier = Modifier.padding(padding),
             )
             AppDestination.COLLECTION -> CollectionScreen(
                 state = state,
                 title = "내 컬렉션",
-                cards = state.sessionCards,
+                cards = state.sortedSessionCards,
                 emptyTitle = "아직 등록된 카드가 없어요",
                 onScan = { openDestination(AppDestination.SCAN) },
                 onQuantityChanged = onQuantityChanged,
                 onFavoriteToggle = onFavoriteToggle,
                 onRefresh = onRefreshCollection,
+                onSortFieldChanged = onCollectionSortFieldChanged,
+                onSortDirectionToggle = onCollectionSortDirectionToggle,
                 modifier = Modifier.padding(padding),
             )
             AppDestination.FAVORITES -> CollectionScreen(
                 state = state,
                 title = "즐겨찾기",
-                cards = state.favoriteCards,
+                cards = state.sortedFavoriteCards,
                 emptyTitle = "즐겨찾기한 카드가 없어요",
                 onScan = { openDestination(AppDestination.SCAN) },
                 onQuantityChanged = onQuantityChanged,
                 onFavoriteToggle = onFavoriteToggle,
                 onRefresh = onRefreshCollection,
+                onSortFieldChanged = onCollectionSortFieldChanged,
+                onSortDirectionToggle = onCollectionSortDirectionToggle,
                 modifier = Modifier.padding(padding),
             )
             AppDestination.SETTINGS -> SettingsScreen(
@@ -234,6 +252,7 @@ fun PokeBinderApp(
                 themeMode = themeMode,
                 onThemeModeChanged = onThemeModeChanged,
                 onLanguageSelected = onLanguageSelected,
+                onDisplayCurrencyChanged = onDisplayCurrencyChanged,
                 onRefreshCollection = onRefreshCollection,
                 onProfileUpdate = onProfileUpdate,
                 onPasswordUpdate = onPasswordUpdate,
@@ -301,11 +320,14 @@ private fun AuthScreen(
             .navigationBarsPadding(),
     ) {
         item {
-            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
                 Surface(
                     color = Color.White,
-                    shape = RoundedCornerShape(16.dp),
-                    modifier = Modifier.size(62.dp),
+                    shape = RoundedCornerShape(15.dp),
+                    modifier = Modifier.size(64.dp),
                 ) {
                     Image(
                         painter = painterResource(R.drawable.app_icon),
@@ -314,24 +336,26 @@ private fun AuthScreen(
                         modifier = Modifier.fillMaxSize(),
                     )
                 }
-                Spacer(modifier = Modifier.height(14.dp))
-                Text(
-                    text = "PokeBinder",
-                    color = MaterialTheme.colorScheme.onBackground,
-                    fontSize = 28.sp,
-                    fontWeight = FontWeight.Bold,
-                )
-                Text(
-                    text = when (mode) {
-                        "signup" -> "새 컬렉터 계정을 만드세요"
-                        "reset" -> "가입한 이메일로 재설정 링크를 보내드려요"
-                        else -> "내 카드 컬렉션에 로그인"
-                    },
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    fontSize = 14.sp,
-                )
-                Spacer(modifier = Modifier.height(26.dp))
+                Spacer(modifier = Modifier.width(15.dp))
+                Column {
+                    Text(
+                        text = "PokeBinder",
+                        color = MaterialTheme.colorScheme.onBackground,
+                        fontSize = 28.sp,
+                        fontWeight = FontWeight.Bold,
+                    )
+                    Text(
+                        text = when (mode) {
+                            "signup" -> "새 컬렉터 계정을 만드세요"
+                            "reset" -> "가입한 이메일로 재설정 링크를 보내드려요"
+                            else -> "내 카드 컬렉션에 로그인"
+                        },
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        fontSize = 14.sp,
+                    )
+                }
             }
+            Spacer(modifier = Modifier.height(24.dp))
         }
         item {
             Surface(
@@ -613,6 +637,8 @@ private fun CollectionScreen(
     onQuantityChanged: (String, Int) -> Unit,
     onFavoriteToggle: (String) -> Unit,
     onRefresh: () -> Unit,
+    onSortFieldChanged: (CollectionSortField) -> Unit,
+    onSortDirectionToggle: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     LazyColumn(
@@ -678,6 +704,17 @@ private fun CollectionScreen(
                 }
             }
         }
+        item {
+            SortControls(
+                labels = CollectionSortField.values().map { it.label },
+                selectedIndex = state.collectionSortField.ordinal,
+                direction = state.collectionSortDirection,
+                onSelected = { index ->
+                    onSortFieldChanged(CollectionSortField.values()[index])
+                },
+                onDirectionToggle = onSortDirectionToggle,
+            )
+        }
         if (cards.isEmpty()) {
             item {
                 EmptyCollection(
@@ -688,6 +725,7 @@ private fun CollectionScreen(
         } else {
             items(cards, key = ::collectionKey) { item ->
                 CollectionCard(
+                    state = state,
                     item = item,
                     isFavorite = item.collectionKey in state.favoriteCardIds,
                     onQuantityChanged = onQuantityChanged,
@@ -774,6 +812,7 @@ private fun SummaryMetric(
 
 @Composable
 private fun CollectionCard(
+    state: ScannerUiState,
     item: SessionCard,
     isFavorite: Boolean,
     onQuantityChanged: (String, Int) -> Unit,
@@ -841,7 +880,10 @@ private fun CollectionCard(
                 Spacer(modifier = Modifier.height(7.dp))
                 Text(
                     text = item.card.marketPrice?.let {
-                        formatMoney(it * item.quantity, item.card.currency)
+                        formatMoney(
+                            state.convertedPrice(item.card) * item.quantity,
+                            state.displayCurrency,
+                        )
                     } ?: "가격 확인 중",
                     color = MaterialTheme.colorScheme.primary,
                     fontWeight = FontWeight.Bold,
@@ -938,9 +980,10 @@ private fun EmptyCollection(
 @Composable
 private fun SearchScreen(
     state: ScannerUiState,
-    onLanguageSelected: (CardLanguage) -> Unit,
     onSearch: (String) -> Unit,
     onAddCard: (RecognizedCard) -> Unit,
+    onSortFieldChanged: (SearchSortField) -> Unit,
+    onSortDirectionToggle: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     var query by rememberSaveable { mutableStateOf("") }
@@ -952,30 +995,6 @@ private fun SearchScreen(
     ) {
         item {
             Row(
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .horizontalScroll(rememberScrollState()),
-            ) {
-                listOf(
-                    CardLanguage.JAPANESE,
-                    CardLanguage.ENGLISH,
-                    CardLanguage.KOREAN,
-                ).forEach { language ->
-                    SelectChip(
-                        label = when (language) {
-                            CardLanguage.JAPANESE -> "일본판 메인"
-                            CardLanguage.ENGLISH -> "미국판"
-                            CardLanguage.KOREAN -> "한국판 베타"
-                        },
-                        selected = state.searchLanguage == language,
-                        onClick = { onLanguageSelected(language) },
-                    )
-                }
-            }
-        }
-        item {
-            Row(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 modifier = Modifier.fillMaxWidth(),
@@ -984,13 +1003,7 @@ private fun SearchScreen(
                     value = query,
                     onValueChange = { query = it },
                     placeholder = {
-                        Text(
-                            if (state.searchLanguage == CardLanguage.JAPANESE) {
-                                "리자몽, リザードン, Charizard"
-                            } else {
-                                "카드 이름 또는 번호"
-                            },
-                        )
+                        Text("리자몽, リザードン, Charizard")
                     },
                     leadingIcon = {
                         Icon(
@@ -1028,6 +1041,19 @@ private fun SearchScreen(
                 }
             }
         }
+        if (state.searchResults.isNotEmpty()) {
+            item {
+                SortControls(
+                    labels = SearchSortField.values().map { it.label },
+                    selectedIndex = state.searchSortField.ordinal,
+                    direction = state.searchSortDirection,
+                    onSelected = { index ->
+                        onSortFieldChanged(SearchSortField.values()[index])
+                    },
+                    onDirectionToggle = onSortDirectionToggle,
+                )
+            }
+        }
         item {
             Column(modifier = Modifier.padding(top = 4.dp)) {
                 Text(
@@ -1055,11 +1081,7 @@ private fun SearchScreen(
                     modifier = Modifier.fillMaxWidth(),
                 ) {
                     Text(
-                        text = if (state.searchLanguage == CardLanguage.JAPANESE) {
-                            "일본판 카드가 기본입니다. 한국어·일본어·영어 이름으로 검색해 보세요."
-                        } else {
-                            "검색 결과가 여기에 표시됩니다."
-                        },
+                        text = "한 번의 검색으로 일본판·영문판·한국판을 함께 보여드려요.",
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.padding(22.dp),
                     )
@@ -1067,10 +1089,11 @@ private fun SearchScreen(
             }
         } else {
             items(
-                state.searchResults,
+                state.sortedSearchResults,
                 key = { "${it.source}:${it.language.code}:${it.id}" },
             ) { card ->
                 SearchResultCard(
+                    state = state,
                     card = card,
                     busy = state.searchBusy,
                     onAdd = { onAddCard(card) },
@@ -1082,6 +1105,7 @@ private fun SearchScreen(
 
 @Composable
 private fun SearchResultCard(
+    state: ScannerUiState,
     card: RecognizedCard,
     busy: Boolean,
     onAdd: () -> Unit,
@@ -1117,12 +1141,24 @@ private fun SearchResultCard(
                     overflow = TextOverflow.Ellipsis,
                 )
                 Text(
-                    text = "#${card.number} · ${card.id}",
+                    text = "${card.language.label} · #${card.number} · ${card.setName}",
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     fontSize = 12.sp,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
+                card.marketPrice?.let {
+                    Spacer(modifier = Modifier.height(5.dp))
+                    Text(
+                        text = formatMoney(
+                            state.convertedPrice(card),
+                            state.displayCurrency,
+                        ),
+                        color = MaterialTheme.colorScheme.primary,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 14.sp,
+                    )
+                }
                 Spacer(modifier = Modifier.height(12.dp))
                 Button(
                     onClick = onAdd,
@@ -1149,6 +1185,7 @@ private fun SettingsScreen(
     themeMode: ThemeMode,
     onThemeModeChanged: (ThemeMode) -> Unit,
     onLanguageSelected: (CardLanguage) -> Unit,
+    onDisplayCurrencyChanged: (String) -> Unit,
     onRefreshCollection: () -> Unit,
     onProfileUpdate: (String) -> Unit,
     onPasswordUpdate: (String, String) -> Unit,
@@ -1266,6 +1303,34 @@ private fun SettingsScreen(
                         )
                     }
                 }
+            }
+        }
+        item {
+            SettingsGroup(title = "표시 통화") {
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .horizontalScroll(rememberScrollState()),
+                ) {
+                    listOf(
+                        "JPY" to "일본 엔",
+                        "KRW" to "한국 원",
+                        "USD" to "미국 달러",
+                    ).forEach { (currency, label) ->
+                        SelectChip(
+                            label = "$currency · $label",
+                            selected = state.displayCurrency == currency,
+                            onClick = { onDisplayCurrencyChanged(currency) },
+                        )
+                    }
+                }
+                Spacer(modifier = Modifier.height(10.dp))
+                Text(
+                    text = "모든 카드 가격과 총 가치를 선택한 통화로 환산합니다.",
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    fontSize = 12.sp,
+                )
             }
         }
         item {
@@ -1465,6 +1530,52 @@ private fun SelectChip(
                 fontWeight = FontWeight.SemiBold,
                 fontSize = 13.sp,
             )
+        }
+    }
+}
+
+@Composable
+private fun SortControls(
+    labels: List<String>,
+    selectedIndex: Int,
+    direction: SortDirection,
+    onSelected: (Int) -> Unit,
+    onDirectionToggle: () -> Unit,
+) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(7.dp),
+            modifier = Modifier
+                .weight(1f)
+                .horizontalScroll(rememberScrollState()),
+        ) {
+            labels.forEachIndexed { index, label ->
+                SelectChip(
+                    label = label,
+                    selected = selectedIndex == index,
+                    onClick = { onSelected(index) },
+                )
+            }
+        }
+        Surface(
+            color = MaterialTheme.colorScheme.surfaceVariant,
+            shape = RoundedCornerShape(12.dp),
+        ) {
+            IconButton(onClick = onDirectionToggle) {
+                Icon(
+                    imageVector = if (direction == SortDirection.ASCENDING) {
+                        Icons.Rounded.ArrowUpward
+                    } else {
+                        Icons.Rounded.ArrowDownward
+                    },
+                    contentDescription = direction.label,
+                    tint = MaterialTheme.colorScheme.onSurface,
+                )
+            }
         }
     }
 }

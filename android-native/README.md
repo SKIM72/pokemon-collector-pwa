@@ -13,9 +13,10 @@ focuses on fast, continuous camera recognition.
 - Supabase email login, sign-up, password reset, profile, and logout
 - Encrypted local authentication session storage
 - Shared collection synchronization with the React PWA
-- Automatic cloud quantity merge after a successful card scan
-- Japanese-first TCGdex search with Korean, Japanese, and English name aliases
-- English and Korean secondary search modes
+- Scan candidate review and explicit collection confirmation before cloud saving
+- Unified Japanese, Korean, and English TCGdex search with multilingual aliases
+- Search sorting by release date, name, and converted market price
+- Collection sorting by release date, added date, name, and converted market price
 - TCGdex market metadata when it is available
 - `pokebinder://` deep link support from the hosted web app
 - Full-frame card boundary detection without a fixed guide
@@ -26,12 +27,14 @@ focuses on fast, continuous camera recognition.
 - On-device Japanese, Korean, and English OCR fallback for cards missing from the image index
 - TCGdex card-name and local-number verification after a scan
 - Private Supabase Storage fallback for newly released cards without provider images
+- On-device scan-image fallback when a provider image does not exist
 - Collection price and image refresh from current TCGdex detail responses
+- JPY default display currency with JPY, KRW, and USD settings
 - Japanese, Korean, and English scan modes
 - Supabase Edge Function image recognition client
 - Match confidence, card metadata, and market price overlay
 - Horizontal candidate list with manual correction
-- Duplicate quantity merging and a running scan total
+- Tap-to-focus, torch control, duplicate quantity merging, and a running scan total
 - Light, dark, and system theme controls
 
 The collection is stored in the existing Supabase `collection_cards` table, so
@@ -92,9 +95,10 @@ app converts it to a normalized 1024-dimension embedding and sends:
 ```
 
 If TCGdex has no reference image, the app reads the card name and local number
-on-device and searches TCGdex directly. Only when the matched card still has no
-provider image does the app upload the perspective-corrected scan to the private
-`card-scans` bucket and save a signed thumbnail URL.
+on-device and searches TCGdex directly. The perspective-corrected scan is saved
+locally as an immediate image fallback. After the user confirms the candidate,
+the app also attempts to upload it to the private `card-scans` bucket so the
+thumbnail can synchronize to other devices.
 
 The function may return the card object directly or inside a `card` property:
 

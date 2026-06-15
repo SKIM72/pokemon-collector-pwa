@@ -7,18 +7,22 @@ import com.pokebinder.scanner.data.AuthOutcome
 import com.pokebinder.scanner.data.CardRecognitionRepository
 import com.pokebinder.scanner.data.CardScanImageRepository
 import com.pokebinder.scanner.data.EdgeFunctionCardRecognitionRepository
+import com.pokebinder.scanner.data.ExchangeRateRepository
 import com.pokebinder.scanner.data.SupabaseAuthRepository
 import com.pokebinder.scanner.data.SupabaseCollectionRepository
 import com.pokebinder.scanner.data.SupabaseSession
 import com.pokebinder.scanner.data.TcgDexRepository
 import com.pokebinder.scanner.model.AuthStatus
 import com.pokebinder.scanner.model.CardLanguage
+import com.pokebinder.scanner.model.CollectionSortField
 import com.pokebinder.scanner.model.FrameProbe
 import com.pokebinder.scanner.model.RecognitionOutcome
 import com.pokebinder.scanner.model.RecognizedCard
 import com.pokebinder.scanner.model.ScanPhase
+import com.pokebinder.scanner.model.SearchSortField
 import com.pokebinder.scanner.model.ScannerUiState
 import com.pokebinder.scanner.model.SessionCard
+import com.pokebinder.scanner.model.SortDirection
 import com.pokebinder.scanner.scanner.CardImageEmbedder
 import com.pokebinder.scanner.scanner.CardTextRecognizer
 import kotlinx.coroutines.async
@@ -29,6 +33,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import java.time.Instant
 
 class ScannerViewModel(application: Application) : AndroidViewModel(application) {
     private val imageEmbedder = CardImageEmbedder(application)
@@ -37,8 +42,9 @@ class ScannerViewModel(application: Application) : AndroidViewModel(application)
         EdgeFunctionCardRecognitionRepository(imageEmbedder)
     private val authRepository = SupabaseAuthRepository(application)
     private val collectionRepository = SupabaseCollectionRepository()
-    private val scanImageRepository = CardScanImageRepository()
+    private val scanImageRepository = CardScanImageRepository(application)
     private val cardSearchRepository = TcgDexRepository()
+    private val exchangeRateRepository = ExchangeRateRepository()
 
     private val mutableState = MutableStateFlow(
         ScannerUiState(
@@ -50,10 +56,13 @@ class ScannerViewModel(application: Application) : AndroidViewModel(application)
 
     private var authSession: SupabaseSession? = null
     private var requestInFlight = false
-    private var lastMatchedId: String? = null
-    private var lastMatchedAt = 0L
+    private var pendingScanJpeg: ByteArray? = null
 
     init {
+        viewModelScope.launch {
+            val rates = exchangeRateRepository.loadRates()
+            mutableState.update { it.copy(currencyRates = rates) }
+        }
         restoreSession()
     }
 
@@ -139,41 +148,22 @@ class ScannerViewModel(application: Application) : AndroidViewModel(application)
         }
     }
 
-    fun selectSearchLanguage(language: CardLanguage) {
-        mutableState.update {
-            it.copy(
-                searchLanguage = language,
-                searchResults = emptyList(),
-                searchMessage = when (language) {
-                    CardLanguage.JAPANESE -> "일본판 카드를 우선 검색합니다"
-                    CardLanguage.ENGLISH -> "영문판 카드를 검색합니다"
-                    CardLanguage.KOREAN -> "한국판 데이터는 아직 제한적입니다"
-                },
-            )
-        }
-    }
-
     fun searchCards(query: String) {
         val trimmed = query.trim()
         if (trimmed.isBlank()) {
             mutableState.update { it.copy(searchMessage = "검색어를 입력해 주세요") }
             return
         }
-        val language = mutableState.value.searchLanguage
         viewModelScope.launch {
             mutableState.update {
                 it.copy(
                     searchBusy = true,
                     searchResults = emptyList(),
-                    searchMessage = if (language == CardLanguage.JAPANESE) {
-                        "일본판 카드 검색 중"
-                    } else {
-                        "${language.label} 카드 검색 중"
-                    },
+                    searchMessage = "일본판·영문판·한국판을 함께 검색 중",
                 )
             }
             runCatching {
-                cardSearchRepository.search(trimmed, language)
+                cardSearchRepository.searchAllLanguages(trimmed)
             }.onSuccess { cards ->
                 mutableState.update {
                     it.copy(
@@ -194,6 +184,40 @@ class ScannerViewModel(application: Application) : AndroidViewModel(application)
                     )
                 }
             }
+        }
+    }
+
+    fun setSearchSortField(field: SearchSortField) {
+        mutableState.update { it.copy(searchSortField = field) }
+    }
+
+    fun toggleSearchSortDirection() {
+        mutableState.update {
+            it.copy(searchSortDirection = it.searchSortDirection.toggled())
+        }
+    }
+
+    fun setCollectionSortField(field: CollectionSortField) {
+        mutableState.update { it.copy(collectionSortField = field) }
+    }
+
+    fun toggleCollectionSortDirection() {
+        mutableState.update {
+            it.copy(collectionSortDirection = it.collectionSortDirection.toggled())
+        }
+    }
+
+    fun setDisplayCurrency(currency: String) {
+        if (currency !in setOf("JPY", "KRW", "USD")) return
+        mutableState.update { it.copy(displayCurrency = currency) }
+        viewModelScope.launch {
+            val session = activeSession() ?: return@launch
+            runCatching { collectionRepository.saveDisplayCurrency(session, currency) }
+                .onFailure { error ->
+                    mutableState.update {
+                        it.copy(syncMessage = error.message ?: "통화 설정 저장에 실패했습니다")
+                    }
+                }
         }
     }
 
@@ -238,19 +262,27 @@ class ScannerViewModel(application: Application) : AndroidViewModel(application)
     }
 
     fun selectLanguage(language: CardLanguage) {
+        pendingScanJpeg = null
         mutableState.update {
             it.copy(
                 language = language,
                 phase = ScanPhase.WAITING,
                 currentMatch = null,
                 candidates = emptyList(),
+                scanAwaitingConfirmation = false,
+                scanAdded = false,
+                scanSaving = false,
                 statusMessage = "화면 안에 카드를 보여 주세요",
             )
         }
     }
 
     fun onFrameProbe(probe: FrameProbe) {
-        if (requestInFlight) return
+        if (requestInFlight || mutableState.value.scanAwaitingConfirmation ||
+            mutableState.value.scanAdded
+        ) {
+            return
+        }
         mutableState.update { current ->
             val phase = when {
                 probe.detection == null -> ScanPhase.WAITING
@@ -272,7 +304,11 @@ class ScannerViewModel(application: Application) : AndroidViewModel(application)
     }
 
     fun onStableFrame(jpegBytes: ByteArray) {
-        if (requestInFlight) return
+        if (requestInFlight || mutableState.value.scanAwaitingConfirmation ||
+            mutableState.value.scanAdded
+        ) {
+            return
+        }
         requestInFlight = true
         val language = mutableState.value.language
         mutableState.update {
@@ -294,8 +330,19 @@ class ScannerViewModel(application: Application) : AndroidViewModel(application)
             when (resolvedOutcome) {
                 is RecognitionOutcome.Match -> {
                     val prepared = prepareScannedMatch(resolvedOutcome, jpegBytes)
-                    val shouldPersist = applyMatch(prepared)
-                    if (shouldPersist) syncCard(prepared.card)
+                    pendingScanJpeg = jpegBytes
+                    mutableState.update {
+                        it.copy(
+                            currentMatch = prepared.card,
+                            candidates = prepared.candidates,
+                            phase = ScanPhase.MATCHED,
+                            scanAwaitingConfirmation = true,
+                            scanAdded = false,
+                            scanSaving = false,
+                            statusMessage = "후보를 확인한 뒤 컬렉션에 추가해 주세요",
+                            isEndpointConfigured = true,
+                        )
+                    }
                 }
                 RecognitionOutcome.NoMatch -> mutableState.update {
                     it.copy(
@@ -313,6 +360,93 @@ class ScannerViewModel(application: Application) : AndroidViewModel(application)
                 }
             }
             requestInFlight = false
+        }
+    }
+
+    fun confirmScannedCard() {
+        val card = mutableState.value.currentMatch ?: return
+        if (!mutableState.value.scanAwaitingConfirmation ||
+            mutableState.value.scanSaving
+        ) {
+            return
+        }
+        val jpegBytes = pendingScanJpeg
+        viewModelScope.launch {
+            mutableState.update {
+                it.copy(scanSaving = true, statusMessage = "컬렉션에 저장 중...")
+            }
+            var cardToSave = card
+            var imageUploaded = card.imageUrl?.startsWith("file:") != true
+            if (jpegBytes != null && (
+                    card.imageUrl == null ||
+                        card.imageUrl.startsWith("file:")
+                    )
+            ) {
+                val localUrl = scanImageRepository.saveLocal(card, jpegBytes)
+                cardToSave = card.copy(
+                    imageUrl = localUrl,
+                    imageHighUrl = localUrl,
+                )
+                val session = activeSession()
+                val uploadedUrl = session?.let {
+                    runCatching {
+                        scanImageRepository.upload(it, card, jpegBytes)
+                    }.getOrNull()
+                }
+                if (uploadedUrl != null) {
+                    cardToSave = card.copy(
+                        imageUrl = uploadedUrl,
+                        imageHighUrl = uploadedUrl,
+                    )
+                    imageUploaded = true
+                }
+            }
+
+            mutableState.update { current ->
+                val updatedCollection = incrementCard(current.sessionCards, cardToSave)
+                current.copy(
+                    currentMatch = cardToSave,
+                    candidates = current.candidates.map {
+                        if (sameCard(it, cardToSave)) cardToSave else it
+                    },
+                    sessionCards = updatedCollection,
+                    recentScanCards = incrementCard(current.recentScanCards, cardToSave),
+                    scanAwaitingConfirmation = false,
+                    scanAdded = true,
+                    scanSaving = true,
+                    statusMessage = "${cardToSave.name} 1장 추가 완료",
+                )
+            }
+            val item = mutableState.value.sessionCards
+                .firstOrNull { matchesRecognized(it, cardToSave) }
+            val saved = item?.let { persistCard(it) } ?: false
+            mutableState.update {
+                it.copy(
+                    scanSaving = false,
+                    statusMessage = when {
+                        saved && imageUploaded -> "${cardToSave.name} 1장 추가 완료"
+                        saved -> "${cardToSave.name} 1장 추가 완료 · 사진은 이 기기에 저장됨"
+                        else -> "${cardToSave.name}은 추가했지만 클라우드 저장에 실패했습니다"
+                    },
+                )
+            }
+        }
+    }
+
+    fun startNextScan() {
+        pendingScanJpeg = null
+        requestInFlight = false
+        mutableState.update {
+            it.copy(
+                phase = ScanPhase.WAITING,
+                probe = FrameProbe(),
+                currentMatch = null,
+                candidates = emptyList(),
+                scanAwaitingConfirmation = false,
+                scanAdded = false,
+                scanSaving = false,
+                statusMessage = "다음 카드를 화면 안에 보여 주세요",
+            )
         }
     }
 
@@ -382,68 +516,39 @@ class ScannerViewModel(application: Application) : AndroidViewModel(application)
     }
 
     fun clearSession() {
+        pendingScanJpeg = null
         mutableState.update {
             it.copy(
                 recentScanCards = emptyList(),
                 currentMatch = null,
                 candidates = emptyList(),
                 phase = ScanPhase.WAITING,
+                scanAwaitingConfirmation = false,
+                scanAdded = false,
+                scanSaving = false,
                 statusMessage = "새 스캔을 시작합니다",
             )
         }
     }
 
     fun selectCandidate(candidate: RecognizedCard) {
-        val beforeState = mutableState.value
-        val previous = beforeState.currentMatch ?: return
-        if (previous.id == candidate.id) return
-        val previousItem = beforeState.sessionCards.firstOrNull {
-            matchesRecognized(it, previous)
-        }
-
         mutableState.update { current ->
-            val withoutPrevious = decrementRecognized(current.sessionCards, previous)
-            val candidateItem = withoutPrevious.firstOrNull {
-                matchesRecognized(it, candidate)
-            }
-            val correctedCollection = if (candidateItem == null) {
-                listOf(SessionCard(candidate)) + withoutPrevious
+            val selected = if (candidate.imageUrl == null) {
+                val localUrl = current.currentMatch?.imageUrl
+                    ?.takeIf { it.startsWith("file:") }
+                candidate.copy(
+                    imageUrl = localUrl,
+                    imageHighUrl = localUrl,
+                )
             } else {
-                withoutPrevious.map {
-                    if (matchesRecognized(it, candidate)) {
-                        it.copy(quantity = it.quantity + 1)
-                    } else {
-                        it
-                    }
-                }
+                candidate
             }
-            val correctedRecent = replaceRecentCandidate(
-                current.recentScanCards,
-                previous,
-                candidate,
-            )
-
-            lastMatchedId = candidate.id
-            lastMatchedAt = System.currentTimeMillis()
             current.copy(
-                currentMatch = candidate,
-                sessionCards = correctedCollection,
-                recentScanCards = correctedRecent,
-                favoriteCardIds = current.favoriteCardIds.intersect(
-                    correctedCollection.map { it.collectionKey }.toSet(),
-                ),
-                statusMessage = "${candidate.name}(으)로 후보를 변경했습니다",
+                currentMatch = selected,
+                scanAwaitingConfirmation = true,
+                scanAdded = false,
+                statusMessage = "${candidate.name} 선택됨 · 추가 버튼을 눌러 주세요",
             )
-        }
-
-        viewModelScope.launch {
-            val afterState = mutableState.value
-            persistChange(
-                previousItem,
-                afterState.sessionCards.firstOrNull { matchesRecognized(it, previous) },
-            )
-            afterState.sessionCards.firstOrNull { matchesRecognized(it, candidate) }
-                ?.let { persistCard(it) }
         }
     }
 
@@ -538,6 +643,12 @@ class ScannerViewModel(application: Application) : AndroidViewModel(application)
                 authMessage = "",
             )
         }
+        viewModelScope.launch {
+            val currency = runCatching {
+                collectionRepository.loadDisplayCurrency(session)
+            }.getOrDefault("JPY")
+            mutableState.update { it.copy(displayCurrency = currency) }
+        }
     }
 
     private suspend fun loadCollection(
@@ -559,18 +670,32 @@ class ScannerViewModel(application: Application) : AndroidViewModel(application)
             }
             return
         }
+        val cardsWithLocalImages = cards.map { item ->
+            if (item.card.imageUrl != null) {
+                item
+            } else {
+                scanImageRepository.localImageUrl(item.card)?.let { localUrl ->
+                    item.copy(
+                        card = item.card.copy(
+                            imageUrl = localUrl,
+                            imageHighUrl = localUrl,
+                        ),
+                    )
+                } ?: item
+            }
+        }
         mutableState.update {
             it.copy(
-                sessionCards = cards,
-                favoriteCardIds = cards.filter { card -> card.isFavorite }
+                sessionCards = cardsWithLocalImages,
+                favoriteCardIds = cardsWithLocalImages.filter { card -> card.isFavorite }
                     .map { card -> card.collectionKey }
                     .toSet(),
                 isSyncing = false,
-                syncMessage = "${cards.size}종류 동기화 완료",
+                syncMessage = "${cardsWithLocalImages.size}종류 동기화 완료",
                 authBusy = false,
             )
         }
-        refreshCardDetails(session, cards, refreshAllDetails)
+        refreshCardDetails(session, cardsWithLocalImages, refreshAllDetails)
     }
 
     private suspend fun refreshCardDetails(
@@ -617,13 +742,24 @@ class ScannerViewModel(application: Application) : AndroidViewModel(application)
                     isFavorite = item.isFavorite,
                 )
             }.getOrDefault(updatedItem)
+            val localImage = updatedItem.card.imageUrl?.takeIf { it.startsWith("file:") }
+            val merged = if (saved.card.imageUrl == null && localImage != null) {
+                saved.copy(
+                    card = saved.card.copy(
+                        imageUrl = localImage,
+                        imageHighUrl = localImage,
+                    ),
+                )
+            } else {
+                saved
+            }
             mutableState.update { current ->
                 current.copy(
                     sessionCards = current.sessionCards.map {
-                        if (it.collectionKey == item.collectionKey) saved else it
+                        if (it.collectionKey == item.collectionKey) merged else it
                     },
                     recentScanCards = current.recentScanCards.map {
-                        if (it.collectionKey == item.collectionKey) saved else it
+                        if (it.collectionKey == item.collectionKey) merged else it
                     },
                 )
             }
@@ -667,15 +803,8 @@ class ScannerViewModel(application: Application) : AndroidViewModel(application)
             cardSearchRepository.fetchCard(outcome.card)
         }.getOrDefault(outcome.card)
         if (card.imageUrl == null) {
-            val session = activeSession()
-            val uploadedUrl = session?.let {
-                runCatching {
-                    scanImageRepository.upload(it, card, jpegBytes)
-                }.getOrNull()
-            }
-            if (uploadedUrl != null) {
-                card = card.copy(imageUrl = uploadedUrl, imageHighUrl = uploadedUrl)
-            }
+            val localUrl = scanImageRepository.saveLocal(card, jpegBytes)
+            card = card.copy(imageUrl = localUrl, imageHighUrl = localUrl)
         }
         val candidates = outcome.candidates.map {
             if (it.id == card.id && it.language == card.language) card else it
@@ -687,46 +816,6 @@ class ScannerViewModel(application: Application) : AndroidViewModel(application)
             }
         }
         return RecognitionOutcome.Match(card, candidates)
-    }
-
-    private fun applyMatch(outcome: RecognitionOutcome.Match): Boolean {
-        val card = outcome.card
-        val now = System.currentTimeMillis()
-        val isImmediateDuplicate = lastMatchedId == card.id && now - lastMatchedAt < 3_500L
-        lastMatchedId = card.id
-        lastMatchedAt = now
-
-        mutableState.update { current ->
-            val updatedCollection = if (isImmediateDuplicate) {
-                current.sessionCards
-            } else {
-                incrementCard(current.sessionCards, card)
-            }
-            val updatedRecent = if (isImmediateDuplicate) {
-                current.recentScanCards
-            } else {
-                incrementCard(current.recentScanCards, card)
-            }
-            current.copy(
-                currentMatch = card,
-                candidates = outcome.candidates,
-                sessionCards = updatedCollection,
-                recentScanCards = updatedRecent,
-                phase = ScanPhase.MATCHED,
-                statusMessage = if (isImmediateDuplicate) {
-                    "같은 카드입니다. 다른 카드를 비춰 주세요"
-                } else {
-                    "${card.name} 인식 완료"
-                },
-                isEndpointConfigured = true,
-            )
-        }
-        return !isImmediateDuplicate
-    }
-
-    private suspend fun syncCard(card: RecognizedCard) {
-        mutableState.value.sessionCards.firstOrNull { matchesRecognized(it, card) }
-            ?.let { persistCard(it) }
     }
 
     private suspend fun persistChange(
@@ -751,13 +840,24 @@ class ScannerViewModel(application: Application) : AndroidViewModel(application)
                 item = item,
                 isFavorite = item.collectionKey in mutableState.value.favoriteCardIds,
             )
+            val localImage = item.card.imageUrl?.takeIf { it.startsWith("file:") }
+            val merged = if (saved.card.imageUrl == null && localImage != null) {
+                saved.copy(
+                    card = saved.card.copy(
+                        imageUrl = localImage,
+                        imageHighUrl = localImage,
+                    ),
+                )
+            } else {
+                saved
+            }
             mutableState.update { current ->
                 current.copy(
                     sessionCards = current.sessionCards.map {
-                        if (it.collectionKey == saved.collectionKey) saved else it
+                        if (it.collectionKey == merged.collectionKey) merged else it
                     },
                     recentScanCards = current.recentScanCards.map {
-                        if (it.collectionKey == saved.collectionKey) saved else it
+                        if (it.collectionKey == merged.collectionKey) merged else it
                     },
                 )
             }
@@ -820,29 +920,12 @@ class ScannerViewModel(application: Application) : AndroidViewModel(application)
     ): List<SessionCard> {
         val existing = cards.firstOrNull { matchesRecognized(it, card) }
         return if (existing == null) {
-            listOf(SessionCard(card)) + cards
+            listOf(SessionCard(card, addedAt = Instant.now().toString())) + cards
         } else {
             cards.map {
                 if (matchesRecognized(it, card)) it.copy(quantity = it.quantity + 1) else it
             }
         }
-    }
-
-    private fun replaceRecentCandidate(
-        cards: List<SessionCard>,
-        previous: RecognizedCard,
-        candidate: RecognizedCard,
-    ): List<SessionCard> {
-        val withoutPrevious = decrementRecognized(cards, previous)
-        return incrementCard(withoutPrevious, candidate)
-    }
-
-    private fun decrementRecognized(
-        cards: List<SessionCard>,
-        card: RecognizedCard,
-    ): List<SessionCard> = cards.mapNotNull { item ->
-        if (!matchesRecognized(item, card)) return@mapNotNull item
-        if (item.quantity <= 1) null else item.copy(quantity = item.quantity - 1)
     }
 
     private fun matchesRecognized(
@@ -858,3 +941,17 @@ class ScannerViewModel(application: Application) : AndroidViewModel(application)
         const val MIN_TEXT_MATCH_CONFIDENCE = 0.52
     }
 }
+
+private fun SortDirection.toggled(): SortDirection =
+    if (this == SortDirection.ASCENDING) {
+        SortDirection.DESCENDING
+    } else {
+        SortDirection.ASCENDING
+    }
+
+private fun sameCard(
+    first: RecognizedCard,
+    second: RecognizedCard,
+): Boolean = first.id == second.id &&
+    first.language == second.language &&
+    first.source == second.source

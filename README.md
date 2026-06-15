@@ -19,6 +19,8 @@ Personal Pokemon TCG collection PWA built with React + Vite.
 - Android automatic card-boundary detection and perspective correction
 - Android Supabase authentication and shared cloud collection synchronization
 - Android Japanese-first multilingual TCGdex search
+- Android unified multilingual search, sorting, and JPY/KRW/USD conversion
+- Android scan candidate confirmation, tap-to-focus, and torch control
 - Web-to-Android intent and deep-link handoff
 - On-device MediaPipe image embeddings with Supabase pgvector candidate search
 - JSON export/import backup
@@ -88,7 +90,7 @@ https://<github-user>.github.io/<repository-name>/
 2. Measure recognition quality with real camera photos and tune thresholds.
 3. Add card rectangle/perspective correction before embedding generation.
 4. Index Korean and English reference images.
-5. Add native currency conversion, price history, and portfolio snapshot synchronization.
+5. Add native price history and portfolio snapshot synchronization.
 
 ## Android Native Scanner
 
