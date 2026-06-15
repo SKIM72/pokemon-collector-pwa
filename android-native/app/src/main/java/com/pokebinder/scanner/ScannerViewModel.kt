@@ -237,7 +237,7 @@ class ScannerViewModel(application: Application) : AndroidViewModel(application)
                 phase = ScanPhase.WAITING,
                 currentMatch = null,
                 candidates = emptyList(),
-                statusMessage = "카드를 가이드 안에 맞춰 주세요",
+                statusMessage = "화면 안에 카드를 보여 주세요",
             )
         }
     }
@@ -246,15 +246,17 @@ class ScannerViewModel(application: Application) : AndroidViewModel(application)
         if (requestInFlight) return
         mutableState.update { current ->
             val phase = when {
+                probe.detection == null -> ScanPhase.WAITING
                 probe.brightness !in 35.0..235.0 -> ScanPhase.WAITING
                 probe.stableFrames > 0 -> ScanPhase.STABILIZING
                 else -> ScanPhase.WAITING
             }
             val message = when {
+                probe.detection == null -> "카드 전체가 보이도록 화면 안에 비춰 주세요"
                 probe.brightness < 35.0 -> "조금 더 밝은 곳에서 비춰 주세요"
                 probe.brightness > 235.0 -> "빛 반사를 줄여 주세요"
-                probe.stableFrames > 0 -> "카드를 고정해 주세요"
-                else -> "카드를 가이드 안에 맞춰 주세요"
+                probe.stableFrames > 0 -> "카드 영역 감지됨 · 잠시 고정해 주세요"
+                else -> "카드 모서리를 추적하고 있습니다"
             }
             current.copy(probe = probe, phase = phase, statusMessage = message)
         }

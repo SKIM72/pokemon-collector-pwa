@@ -14,7 +14,6 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -49,7 +48,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
@@ -59,6 +58,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import coil.compose.AsyncImage
+import com.pokebinder.scanner.model.CardDetection
 import com.pokebinder.scanner.model.CardLanguage
 import com.pokebinder.scanner.model.RecognizedCard
 import com.pokebinder.scanner.model.ScanPhase
@@ -119,12 +119,10 @@ fun ScannerScreen(
             onClose = onClose,
         )
 
-        CardGuide(
+        DetectedCardOverlay(
+            detection = state.probe.detection,
             phase = state.phase,
-            modifier = Modifier
-                .align(Alignment.Center)
-                .fillMaxWidth(0.72f)
-                .aspectRatio(63f / 88f),
+            modifier = Modifier.fillMaxSize(),
         )
 
         state.currentMatch?.marketPrice?.let { price ->
@@ -171,7 +169,7 @@ private fun ScannerTopBar(
                     fontWeight = FontWeight.Bold,
                 )
                 Text(
-                    text = "카드 자동 인식",
+                    text = "카드 영역 자동 탐지",
                     color = Color.White,
                     fontSize = 20.sp,
                     fontWeight = FontWeight.Bold,
@@ -242,7 +240,8 @@ private fun ScannerTopBar(
 }
 
 @Composable
-private fun CardGuide(
+private fun DetectedCardOverlay(
+    detection: CardDetection?,
     phase: ScanPhase,
     modifier: Modifier = Modifier,
 ) {
@@ -253,94 +252,36 @@ private fun CardGuide(
         else -> Color(0xFF78EBC2)
     }
 
-    Box(modifier = modifier) {
-        Canvas(modifier = Modifier.fillMaxSize()) {
-            val segment = size.width * 0.2f
-            val stroke = 6.dp.toPx()
-            val radius = 28.dp.toPx()
-
-            drawArc(
+    Canvas(modifier = modifier) {
+        if (detection == null || detection.corners.size != 4) return@Canvas
+        val sourceWidth = detection.frameWidth.toFloat().coerceAtLeast(1f)
+        val sourceHeight = detection.frameHeight.toFloat().coerceAtLeast(1f)
+        val scale = maxOf(size.width / sourceWidth, size.height / sourceHeight)
+        val offsetX = (size.width - sourceWidth * scale) / 2f
+        val offsetY = (size.height - sourceHeight * scale) / 2f
+        val points = detection.corners.map { point ->
+            Offset(
+                x = offsetX + point.x * sourceWidth * scale,
+                y = offsetY + point.y * sourceHeight * scale,
+            )
+        }
+        val path = Path().apply {
+            moveTo(points[0].x, points[0].y)
+            points.drop(1).forEach { lineTo(it.x, it.y) }
+            close()
+        }
+        drawPath(path, guideColor.copy(alpha = 0.12f))
+        drawPath(path, guideColor, style = Stroke(width = 4.dp.toPx()))
+        points.forEach { point ->
+            drawCircle(
+                color = Color.White,
+                radius = 6.dp.toPx(),
+                center = point,
+            )
+            drawCircle(
                 color = guideColor,
-                startAngle = 180f,
-                sweepAngle = 90f,
-                useCenter = false,
-                topLeft = Offset.Zero,
-                size = androidx.compose.ui.geometry.Size(radius * 2, radius * 2),
-                style = Stroke(stroke, cap = StrokeCap.Round),
-            )
-            drawLine(guideColor, Offset(radius, 0f), Offset(segment, 0f), stroke, StrokeCap.Round)
-            drawLine(guideColor, Offset(0f, radius), Offset(0f, segment), stroke, StrokeCap.Round)
-
-            drawArc(
-                color = guideColor,
-                startAngle = 270f,
-                sweepAngle = 90f,
-                useCenter = false,
-                topLeft = Offset(size.width - radius * 2, 0f),
-                size = androidx.compose.ui.geometry.Size(radius * 2, radius * 2),
-                style = Stroke(stroke, cap = StrokeCap.Round),
-            )
-            drawLine(
-                guideColor,
-                Offset(size.width - segment, 0f),
-                Offset(size.width - radius, 0f),
-                stroke,
-                StrokeCap.Round,
-            )
-            drawLine(
-                guideColor,
-                Offset(size.width, radius),
-                Offset(size.width, segment),
-                stroke,
-                StrokeCap.Round,
-            )
-
-            drawArc(
-                color = guideColor,
-                startAngle = 90f,
-                sweepAngle = 90f,
-                useCenter = false,
-                topLeft = Offset(0f, size.height - radius * 2),
-                size = androidx.compose.ui.geometry.Size(radius * 2, radius * 2),
-                style = Stroke(stroke, cap = StrokeCap.Round),
-            )
-            drawLine(
-                guideColor,
-                Offset(0f, size.height - segment),
-                Offset(0f, size.height - radius),
-                stroke,
-                StrokeCap.Round,
-            )
-            drawLine(
-                guideColor,
-                Offset(radius, size.height),
-                Offset(segment, size.height),
-                stroke,
-                StrokeCap.Round,
-            )
-
-            drawArc(
-                color = guideColor,
-                startAngle = 0f,
-                sweepAngle = 90f,
-                useCenter = false,
-                topLeft = Offset(size.width - radius * 2, size.height - radius * 2),
-                size = androidx.compose.ui.geometry.Size(radius * 2, radius * 2),
-                style = Stroke(stroke, cap = StrokeCap.Round),
-            )
-            drawLine(
-                guideColor,
-                Offset(size.width - segment, size.height),
-                Offset(size.width - radius, size.height),
-                stroke,
-                StrokeCap.Round,
-            )
-            drawLine(
-                guideColor,
-                Offset(size.width, size.height - segment),
-                Offset(size.width, size.height - radius),
-                stroke,
-                StrokeCap.Round,
+                radius = 3.5.dp.toPx(),
+                center = point,
             )
         }
     }

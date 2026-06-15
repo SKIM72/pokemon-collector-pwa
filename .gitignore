@@ -7,3 +7,4 @@ __pycache__/
 *.pyc
 .venv-card-index/
 supabase/.temp/
+android-native/test-media/

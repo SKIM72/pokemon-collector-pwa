@@ -19,7 +19,9 @@ focuses on fast, continuous camera recognition.
 - TCGdex market metadata when it is available
 - `pokebinder://` deep link support from the hosted web app
 - 63:88 Pokemon card guide
-- Automatic scan when the center image is bright and stable
+- Full-frame card boundary detection without a fixed guide
+- Perspective correction to a 630 x 880 card image before matching
+- Automatic scan when the detected card area is bright and stable
 - On-device MediaPipe MobileNetV3 image embedding
 - Japanese, Korean, and English scan modes
 - Supabase Edge Function image recognition client

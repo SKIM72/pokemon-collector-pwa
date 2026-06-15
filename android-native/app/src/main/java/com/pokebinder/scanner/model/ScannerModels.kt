@@ -30,6 +30,19 @@ data class FrameProbe(
     val brightness: Double = 0.0,
     val motion: Double = 1.0,
     val stableFrames: Int = 0,
+    val detection: CardDetection? = null,
+)
+
+data class ScanPoint(
+    val x: Float,
+    val y: Float,
+)
+
+data class CardDetection(
+    val corners: List<ScanPoint>,
+    val confidence: Double,
+    val frameWidth: Int,
+    val frameHeight: Int,
 )
 
 data class RecognizedCard(
@@ -80,7 +93,7 @@ data class ScannerUiState(
     val sessionCards: List<SessionCard> = emptyList(),
     val recentScanCards: List<SessionCard> = emptyList(),
     val favoriteCardIds: Set<String> = emptySet(),
-    val statusMessage: String = "카드를 가이드 안에 맞춰 주세요",
+    val statusMessage: String = "화면 안에 카드를 보여 주세요",
     val isEndpointConfigured: Boolean = true,
 ) {
     val totalCards: Int

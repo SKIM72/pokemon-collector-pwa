@@ -16,6 +16,7 @@ Personal Pokemon TCG collection PWA built with React + Vite.
 - Light, dark, and system theme modes
 - Camera capture entry point for the future OCR/image matching pipeline
 - Android native app shell and CameraX scanner with continuous frame stability detection
+- Android automatic card-boundary detection and perspective correction
 - Android Supabase authentication and shared cloud collection synchronization
 - Android Japanese-first multilingual TCGdex search
 - Web-to-Android intent and deep-link handoff
