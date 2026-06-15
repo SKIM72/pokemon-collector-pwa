@@ -57,7 +57,6 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
-import coil.compose.AsyncImage
 import com.pokebinder.scanner.model.CardDetection
 import com.pokebinder.scanner.model.CardLanguage
 import com.pokebinder.scanner.model.RecognizedCard
@@ -348,8 +347,8 @@ private fun ScannerBottomPanel(
                         verticalAlignment = Alignment.CenterVertically,
                         modifier = Modifier.padding(10.dp),
                     ) {
-                        AsyncImage(
-                            model = card.imageUrl,
+                        CardArtwork(
+                            card = card,
                             contentDescription = card.name,
                             contentScale = ContentScale.Crop,
                             modifier = Modifier
@@ -486,8 +485,8 @@ private fun CandidateCardItem(
             verticalAlignment = Alignment.CenterVertically,
             modifier = Modifier.padding(7.dp),
         ) {
-            AsyncImage(
-                model = card.imageUrl,
+            CardArtwork(
+                card = card,
                 contentDescription = card.name,
                 contentScale = ContentScale.Crop,
                 modifier = Modifier
@@ -533,8 +532,8 @@ private fun SessionCardItem(
             verticalAlignment = Alignment.CenterVertically,
             modifier = Modifier.padding(8.dp),
         ) {
-            AsyncImage(
-                model = item.card.imageUrl,
+            CardArtwork(
+                card = item.card,
                 contentDescription = item.card.name,
                 contentScale = ContentScale.Crop,
                 modifier = Modifier
@@ -661,7 +660,7 @@ private fun ScannerShade() {
 private fun formatMoney(value: Double, currency: String): String {
     if (value <= 0.0) return "-"
     val numberFormat = NumberFormat.getNumberInstance(Locale.KOREA).apply {
-        maximumFractionDigits = if (currency == "USD") 2 else 0
+        maximumFractionDigits = if (currency in setOf("USD", "EUR")) 2 else 0
     }
     val symbol = when (currency) {
         "JPY" -> "¥"

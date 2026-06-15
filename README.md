@@ -106,7 +106,10 @@ The scanner uses the official MediaPipe MobileNetV3 Small image embedder on the
 phone. Only the 1024-dimension embedding is sent to the `card-image-match`
 Supabase Edge Function. Reference embeddings are generated from TCGdex images
 with [`scripts/index_tcgdex_cards.py`](./scripts/index_tcgdex_cards.py) and
-searched by cosine similarity in pgvector.
+searched by cosine similarity in pgvector. Cards without a TCGdex reference
+image use on-device Japanese/Korean/English OCR to verify the printed name and
+number. Missing provider images can be stored in the private `card-scans`
+Supabase Storage bucket after a successful scan.
 
 Apply and deploy the scanner backend:
 

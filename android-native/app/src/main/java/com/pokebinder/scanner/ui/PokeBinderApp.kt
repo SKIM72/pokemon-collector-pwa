@@ -5,6 +5,7 @@ package com.pokebinder.scanner.ui
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -66,8 +67,10 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -75,8 +78,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import coil.compose.AsyncImage
 import com.pokebinder.scanner.BuildConfig
+import com.pokebinder.scanner.R
 import com.pokebinder.scanner.model.AuthStatus
 import com.pokebinder.scanner.model.CardLanguage
 import com.pokebinder.scanner.model.FrameProbe
@@ -252,18 +255,16 @@ private fun AppLoadingScreen() {
     ) {
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
             Surface(
-                color = MaterialTheme.colorScheme.primary,
+                color = Color.White,
                 shape = RoundedCornerShape(18.dp),
                 modifier = Modifier.size(68.dp),
             ) {
-                Box(contentAlignment = Alignment.Center) {
-                    Text(
-                        text = "P",
-                        color = MaterialTheme.colorScheme.onPrimary,
-                        fontSize = 30.sp,
-                        fontWeight = FontWeight.Black,
-                    )
-                }
+                Image(
+                    painter = painterResource(R.drawable.app_icon),
+                    contentDescription = "PokeBinder",
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier.fillMaxSize(),
+                )
             }
             Spacer(modifier = Modifier.height(18.dp))
             CircularProgressIndicator(
@@ -302,18 +303,16 @@ private fun AuthScreen(
         item {
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
                 Surface(
-                    color = MaterialTheme.colorScheme.primary,
+                    color = Color.White,
                     shape = RoundedCornerShape(16.dp),
                     modifier = Modifier.size(62.dp),
                 ) {
-                    Box(contentAlignment = Alignment.Center) {
-                        Text(
-                            text = "P",
-                            color = MaterialTheme.colorScheme.onPrimary,
-                            fontSize = 28.sp,
-                            fontWeight = FontWeight.Black,
-                        )
-                    }
+                    Image(
+                        painter = painterResource(R.drawable.app_icon),
+                        contentDescription = "PokeBinder",
+                        contentScale = ContentScale.Crop,
+                        modifier = Modifier.fillMaxSize(),
+                    )
                 }
                 Spacer(modifier = Modifier.height(14.dp))
                 Text(
@@ -521,18 +520,18 @@ private fun AppHeader(
                 .padding(horizontal = 20.dp, vertical = 14.dp),
         ) {
             Surface(
-                color = MaterialTheme.colorScheme.primary,
+                color = Color.White,
                 shape = RoundedCornerShape(9.dp),
                 modifier = Modifier.size(38.dp),
             ) {
-                Box(contentAlignment = Alignment.Center) {
-                    Text(
-                        text = "P",
-                        color = MaterialTheme.colorScheme.onPrimary,
-                        fontWeight = FontWeight.Black,
-                        fontSize = 19.sp,
-                    )
-                }
+                Image(
+                    painter = painterResource(R.drawable.app_icon),
+                    contentDescription = "PokeBinder",
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .clip(RoundedCornerShape(9.dp)),
+                )
             }
             Spacer(modifier = Modifier.width(12.dp))
             Column(modifier = Modifier.weight(1f)) {
@@ -789,8 +788,8 @@ private fun CollectionCard(
             verticalAlignment = Alignment.CenterVertically,
             modifier = Modifier.padding(12.dp),
         ) {
-            AsyncImage(
-                model = item.card.imageUrl,
+            CardArtwork(
+                card = item.card,
                 contentDescription = item.card.name,
                 contentScale = ContentScale.Crop,
                 modifier = Modifier
@@ -1096,8 +1095,8 @@ private fun SearchResultCard(
             verticalAlignment = Alignment.CenterVertically,
             modifier = Modifier.padding(12.dp),
         ) {
-            AsyncImage(
-                model = card.imageUrl,
+            CardArtwork(
+                card = card,
                 contentDescription = card.name,
                 contentScale = ContentScale.Crop,
                 modifier = Modifier
@@ -1498,7 +1497,7 @@ private fun SettingsRow(
 private fun formatMoney(value: Double, currency: String): String {
     if (value <= 0.0) return "-"
     val formatter = NumberFormat.getNumberInstance(Locale.KOREA).apply {
-        maximumFractionDigits = if (currency == "USD") 2 else 0
+        maximumFractionDigits = if (currency in setOf("USD", "EUR")) 2 else 0
     }
     val symbol = when (currency) {
         "JPY" -> "¥"

@@ -68,9 +68,7 @@ class SupabaseCollectionRepository(
                 .addQueryParameter("id", "eq.${item.cloudId}")
                 .addQueryParameter("user_id", "eq.${session.user.id}")
                 .build()
-            val patch = JSONObject()
-                .put("quantity", item.quantity)
-                .put("is_favorite", isFavorite)
+            val patch = cardFieldsJson(item, isFavorite)
             val request = authorizedRequest(url.toString(), session)
                 .header("Prefer", "return=representation")
                 .patch(patch.toString().toRequestBody(JSON_MEDIA_TYPE))
@@ -135,8 +133,13 @@ class SupabaseCollectionRepository(
         userId: String,
         item: SessionCard,
         isFavorite: Boolean,
-    ): JSONObject = JSONObject()
+    ): JSONObject = cardFieldsJson(item, isFavorite)
         .put("user_id", userId)
+
+    private fun cardFieldsJson(
+        item: SessionCard,
+        isFavorite: Boolean,
+    ): JSONObject = JSONObject()
         .put("source", item.card.source)
         .put("language", item.card.language.code)
         .put("external_id", item.card.id)

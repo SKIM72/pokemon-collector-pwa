@@ -1,6 +1,7 @@
 package com.pokebinder.scanner.data
 
 import com.pokebinder.scanner.model.CardLanguage
+import com.pokebinder.scanner.model.CardTextHints
 import com.pokebinder.scanner.model.RecognizedCard
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
@@ -51,28 +52,88 @@ class TcgDexRepository(
                 if (!response.isSuccessful) return@withContext card
                 val body = response.body?.string().orEmpty()
                 if (body.isBlank()) return@withContext card
-                parseDetailed(JSONObject(body), card.language) ?: card
+                val parsed = parseDetailed(JSONObject(body), card.language)
+                parsed?.copy(
+                    confidence = card.confidence,
+                    imageUrl = parsed.imageUrl ?: card.imageUrl,
+                    imageHighUrl = parsed.imageHighUrl ?: card.imageHighUrl,
+                )
+                    ?: card
             }
         }
+
+    suspend fun matchScanText(
+        hints: CardTextHints,
+        language: CardLanguage,
+    ): List<RecognizedCard> = withContext(Dispatchers.IO) {
+        if (hints.names.isEmpty() && hints.localId == null) return@withContext emptyList()
+        val summaries = coroutineScope {
+            buildList {
+                hints.names.take(3).forEach { name ->
+                    add(async { searchFiltered(name, hints.localId, language, 40) })
+                    add(async { searchFiltered(name, null, language, 40) })
+                }
+                if (hints.localId != null) {
+                    add(async { searchFiltered(null, hints.localId, language, 60) })
+                }
+            }.awaitAll().flatten()
+        }.distinctBy { "${it.language.code}:${it.id}" }
+
+        val ranked = summaries.map { card ->
+            val normalizedName = normalized(card.name)
+            val bestNameScore = hints.names.maxOfOrNull { hint ->
+                val normalizedHint = normalized(hint)
+                when {
+                    normalizedHint == normalizedName -> 0.58
+                    normalizedHint.contains(normalizedName) ||
+                        normalizedName.contains(normalizedHint) -> 0.42
+                    else -> sharedPrefixScore(normalizedHint, normalizedName) * 0.28
+                }
+            } ?: 0.0
+            val numberScore = when {
+                hints.localId == null -> 0.0
+                normalizedNumber(card.number) == normalizedNumber(hints.localId) -> 0.38
+                else -> 0.0
+            }
+            card.copy(confidence = (bestNameScore + numberScore).coerceIn(0.0, 0.96))
+        }.sortedByDescending(RecognizedCard::confidence)
+            .take(8)
+
+        coroutineScope {
+            ranked.map { card -> async { fetchCard(card) } }.awaitAll()
+        }.sortedByDescending(RecognizedCard::confidence)
+    }
 
     private fun searchVariant(
         query: String,
         language: CardLanguage,
     ): List<RecognizedCard> {
+        val number = query.trim().takeIf { value ->
+            value.matches(Regex("""\d{1,4}(/[A-Za-z0-9]+)?"""))
+        }
+        return searchFiltered(
+            name = query.trim().takeIf { number == null },
+            localId = number?.substringBefore('/'),
+            language = language,
+            limit = 24,
+        )
+    }
+
+    private fun searchFiltered(
+        name: String?,
+        localId: String?,
+        language: CardLanguage,
+        limit: Int,
+    ): List<RecognizedCard> {
         val url = "$API/${language.code}/cards"
             .toHttpUrl()
             .newBuilder()
             .apply {
-                val number = query.trim().takeIf { value ->
-                    value.matches(Regex("""\d{1,4}(/[A-Za-z0-9]+)?"""))
-                }
-                if (number == null) {
-                    addQueryParameter("name", query.trim())
-                } else {
-                    addQueryParameter("localId", number.substringBefore('/'))
-                }
+                name?.takeIf(String::isNotBlank)?.let { addQueryParameter("name", it.trim()) }
+                localId?.takeIf(String::isNotBlank)
+                    ?.let { addQueryParameter("localId", it.trim()) }
                 addQueryParameter("pagination:page", "1")
-                addQueryParameter("pagination:itemsPerPage", "24")
+                addQueryParameter("pagination:itemsPerPage", limit.toString())
             }
             .build()
         val request = Request.Builder().url(url).get().build()
@@ -171,6 +232,17 @@ class TcgDexRepository(
         fun normalized(value: String): String = value
             .lowercase(Locale.ROOT)
             .replace(" ", "")
+
+        fun normalizedNumber(value: String): String =
+            value.trim().trimStart('0').ifBlank { "0" }
+
+        fun sharedPrefixScore(first: String, second: String): Double {
+            val maximum = minOf(first.length, second.length)
+            if (maximum == 0) return 0.0
+            var matching = 0
+            while (matching < maximum && first[matching] == second[matching]) matching += 1
+            return matching.toDouble() / maxOf(first.length, second.length)
+        }
     }
 
     private data class MarketPrice(

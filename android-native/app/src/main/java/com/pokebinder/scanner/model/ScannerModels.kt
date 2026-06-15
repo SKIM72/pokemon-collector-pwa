@@ -45,6 +45,11 @@ data class CardDetection(
     val frameHeight: Int,
 )
 
+data class CardTextHints(
+    val names: List<String>,
+    val localId: String?,
+)
+
 data class RecognizedCard(
     val id: String,
     val name: String,
@@ -109,7 +114,7 @@ data class ScannerUiState(
 
     val displayCurrency: String
         get() = currentMatch?.currency
-            ?: sessionCards.firstOrNull()?.card?.currency
+            ?: sessionCards.firstOrNull { it.card.marketPrice != null }?.card?.currency
             ?: when (language) {
                 CardLanguage.JAPANESE -> "JPY"
                 CardLanguage.KOREAN -> "KRW"

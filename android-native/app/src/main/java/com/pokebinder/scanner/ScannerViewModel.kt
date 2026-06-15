@@ -5,6 +5,7 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.pokebinder.scanner.data.AuthOutcome
 import com.pokebinder.scanner.data.CardRecognitionRepository
+import com.pokebinder.scanner.data.CardScanImageRepository
 import com.pokebinder.scanner.data.EdgeFunctionCardRecognitionRepository
 import com.pokebinder.scanner.data.SupabaseAuthRepository
 import com.pokebinder.scanner.data.SupabaseCollectionRepository
@@ -19,6 +20,10 @@ import com.pokebinder.scanner.model.ScanPhase
 import com.pokebinder.scanner.model.ScannerUiState
 import com.pokebinder.scanner.model.SessionCard
 import com.pokebinder.scanner.scanner.CardImageEmbedder
+import com.pokebinder.scanner.scanner.CardTextRecognizer
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -27,10 +32,12 @@ import kotlinx.coroutines.launch
 
 class ScannerViewModel(application: Application) : AndroidViewModel(application) {
     private val imageEmbedder = CardImageEmbedder(application)
+    private val cardTextRecognizer = CardTextRecognizer()
     private val recognitionRepository: CardRecognitionRepository =
         EdgeFunctionCardRecognitionRepository(imageEmbedder)
     private val authRepository = SupabaseAuthRepository(application)
     private val collectionRepository = SupabaseCollectionRepository()
+    private val scanImageRepository = CardScanImageRepository()
     private val cardSearchRepository = TcgDexRepository()
 
     private val mutableState = MutableStateFlow(
@@ -128,7 +135,7 @@ class ScannerViewModel(application: Application) : AndroidViewModel(application)
     fun refreshCollection() {
         viewModelScope.launch {
             val session = activeSession() ?: return@launch
-            loadCollection(session)
+            loadCollection(session, refreshAllDetails = true)
         }
     }
 
@@ -255,6 +262,8 @@ class ScannerViewModel(application: Application) : AndroidViewModel(application)
                 probe.detection == null -> "카드 전체가 보이도록 화면 안에 비춰 주세요"
                 probe.brightness < 35.0 -> "조금 더 밝은 곳에서 비춰 주세요"
                 probe.brightness > 235.0 -> "빛 반사를 줄여 주세요"
+                probe.detection.confidence <= 0.35 && probe.stableFrames > 0 ->
+                    "카드 위치 추정됨 · 잠시 고정해 주세요"
                 probe.stableFrames > 0 -> "카드 영역 감지됨 · 잠시 고정해 주세요"
                 else -> "카드 모서리를 추적하고 있습니다"
             }
@@ -271,21 +280,33 @@ class ScannerViewModel(application: Application) : AndroidViewModel(application)
         }
 
         viewModelScope.launch {
-            when (val outcome = recognitionRepository.recognize(jpegBytes, language)) {
+            val primaryOutcome = recognitionRepository.recognize(jpegBytes, language)
+            val resolvedOutcome = when (primaryOutcome) {
+                is RecognitionOutcome.Match -> primaryOutcome
+                RecognitionOutcome.NoMatch -> recognizeFromCardText(jpegBytes, language)
+                is RecognitionOutcome.Unavailable -> {
+                    recognizeFromCardText(jpegBytes, language).let { fallback ->
+                        if (fallback is RecognitionOutcome.Match) fallback else primaryOutcome
+                    }
+                }
+            }
+
+            when (resolvedOutcome) {
                 is RecognitionOutcome.Match -> {
-                    val shouldPersist = applyMatch(outcome)
-                    if (shouldPersist) syncCard(outcome.card)
+                    val prepared = prepareScannedMatch(resolvedOutcome, jpegBytes)
+                    val shouldPersist = applyMatch(prepared)
+                    if (shouldPersist) syncCard(prepared.card)
                 }
                 RecognitionOutcome.NoMatch -> mutableState.update {
                     it.copy(
                         phase = ScanPhase.WAITING,
-                        statusMessage = "일치 카드가 없습니다. 각도와 거리를 조정해 주세요",
+                        statusMessage = "카드명이나 번호를 읽지 못했습니다. 잠시 고정해 주세요",
                     )
                 }
                 is RecognitionOutcome.Unavailable -> mutableState.update {
                     it.copy(
                         phase = ScanPhase.ERROR,
-                        statusMessage = outcome.message,
+                        statusMessage = resolvedOutcome.message,
                         isEndpointConfigured = BuildConfig.SUPABASE_URL.isNotBlank() &&
                             BuildConfig.SUPABASE_ANON_KEY.isNotBlank(),
                     )
@@ -428,6 +449,7 @@ class ScannerViewModel(application: Application) : AndroidViewModel(application)
 
     override fun onCleared() {
         imageEmbedder.close()
+        cardTextRecognizer.close()
         super.onCleared()
     }
 
@@ -518,25 +540,16 @@ class ScannerViewModel(application: Application) : AndroidViewModel(application)
         }
     }
 
-    private suspend fun loadCollection(session: SupabaseSession) {
+    private suspend fun loadCollection(
+        session: SupabaseSession,
+        refreshAllDetails: Boolean = false,
+    ) {
         mutableState.update {
             it.copy(isSyncing = true, syncMessage = "Supabase 동기화 중")
         }
-        runCatching {
+        val cards = runCatching {
             collectionRepository.loadCollection(session)
-        }.onSuccess { cards ->
-            mutableState.update {
-                it.copy(
-                    sessionCards = cards,
-                    favoriteCardIds = cards.filter { card -> card.isFavorite }
-                        .map { card -> card.collectionKey }
-                        .toSet(),
-                    isSyncing = false,
-                    syncMessage = "${cards.size}종류 동기화 완료",
-                    authBusy = false,
-                )
-            }
-        }.onFailure { error ->
+        }.getOrElse { error ->
             mutableState.update {
                 it.copy(
                     isSyncing = false,
@@ -544,7 +557,136 @@ class ScannerViewModel(application: Application) : AndroidViewModel(application)
                     authBusy = false,
                 )
             }
+            return
         }
+        mutableState.update {
+            it.copy(
+                sessionCards = cards,
+                favoriteCardIds = cards.filter { card -> card.isFavorite }
+                    .map { card -> card.collectionKey }
+                    .toSet(),
+                isSyncing = false,
+                syncMessage = "${cards.size}종류 동기화 완료",
+                authBusy = false,
+            )
+        }
+        refreshCardDetails(session, cards, refreshAllDetails)
+    }
+
+    private suspend fun refreshCardDetails(
+        session: SupabaseSession,
+        cards: List<SessionCard>,
+        refreshAll: Boolean,
+    ) {
+        val targets = cards.filter { item ->
+            item.card.source == "tcgdex" &&
+                (refreshAll || item.card.marketPrice == null || item.card.imageUrl == null)
+        }
+        if (targets.isEmpty()) return
+
+        mutableState.update {
+            it.copy(
+                isSyncing = true,
+                syncMessage = if (refreshAll) {
+                    "최신 가격과 이미지 확인 중"
+                } else {
+                    "누락된 카드 정보 확인 중"
+                },
+            )
+        }
+        val refreshed = targets.chunked(4).flatMap { chunk ->
+            coroutineScope {
+                chunk.map { item ->
+                    async {
+                        item to runCatching {
+                            cardSearchRepository.fetchCard(item.card)
+                        }.getOrDefault(item.card)
+                    }
+                }.awaitAll()
+            }
+        }
+
+        var updatedCount = 0
+        for ((item, card) in refreshed) {
+            if (card == item.card) continue
+            val updatedItem = item.copy(card = card)
+            val saved = runCatching {
+                collectionRepository.saveExact(
+                    session = session,
+                    item = updatedItem,
+                    isFavorite = item.isFavorite,
+                )
+            }.getOrDefault(updatedItem)
+            mutableState.update { current ->
+                current.copy(
+                    sessionCards = current.sessionCards.map {
+                        if (it.collectionKey == item.collectionKey) saved else it
+                    },
+                    recentScanCards = current.recentScanCards.map {
+                        if (it.collectionKey == item.collectionKey) saved else it
+                    },
+                )
+            }
+            updatedCount += 1
+        }
+        mutableState.update {
+            it.copy(
+                isSyncing = false,
+                syncMessage = if (updatedCount > 0) {
+                    "${updatedCount}종류 가격·이미지 갱신 완료"
+                } else {
+                    "최신 카드 정보입니다"
+                },
+            )
+        }
+    }
+
+    private suspend fun recognizeFromCardText(
+        jpegBytes: ByteArray,
+        language: CardLanguage,
+    ): RecognitionOutcome {
+        mutableState.update {
+            it.copy(phase = ScanPhase.ANALYZING, statusMessage = "카드명과 번호 확인 중...")
+        }
+        val hints = runCatching {
+            cardTextRecognizer.recognize(jpegBytes, language)
+        }.getOrElse { return RecognitionOutcome.NoMatch }
+        val cards = runCatching {
+            cardSearchRepository.matchScanText(hints, language)
+        }.getOrElse { return RecognitionOutcome.NoMatch }
+        val best = cards.firstOrNull { it.confidence >= MIN_TEXT_MATCH_CONFIDENCE }
+            ?: return RecognitionOutcome.NoMatch
+        return RecognitionOutcome.Match(best, cards)
+    }
+
+    private suspend fun prepareScannedMatch(
+        outcome: RecognitionOutcome.Match,
+        jpegBytes: ByteArray,
+    ): RecognitionOutcome.Match {
+        var card = runCatching {
+            cardSearchRepository.fetchCard(outcome.card)
+        }.getOrDefault(outcome.card)
+        if (card.imageUrl == null) {
+            val session = activeSession()
+            val uploadedUrl = session?.let {
+                runCatching {
+                    scanImageRepository.upload(it, card, jpegBytes)
+                }.getOrNull()
+            }
+            if (uploadedUrl != null) {
+                card = card.copy(imageUrl = uploadedUrl, imageHighUrl = uploadedUrl)
+            }
+        }
+        val candidates = outcome.candidates.map {
+            if (it.id == card.id && it.language == card.language) card else it
+        }.let { current ->
+            if (current.none { it.id == card.id && it.language == card.language }) {
+                listOf(card) + current
+            } else {
+                current
+            }
+        }
+        return RecognitionOutcome.Match(card, candidates)
     }
 
     private fun applyMatch(outcome: RecognitionOutcome.Match): Boolean {
@@ -711,4 +853,8 @@ class ScannerViewModel(application: Application) : AndroidViewModel(application)
         item.card.language == card.language &&
         item.condition == "NM" &&
         item.finish == "normal"
+
+    private companion object {
+        const val MIN_TEXT_MATCH_CONFIDENCE = 0.52
+    }
 }

@@ -8,9 +8,11 @@ import org.opencv.android.Utils
 import org.opencv.core.Core
 import org.opencv.core.CvType
 import org.opencv.core.Mat
+import org.opencv.core.MatOfDouble
 import org.opencv.core.MatOfPoint
 import org.opencv.core.MatOfPoint2f
 import org.opencv.core.Point
+import org.opencv.core.Rect
 import org.opencv.core.Scalar
 import org.opencv.core.Size
 import org.opencv.imgproc.Imgproc
@@ -29,6 +31,8 @@ class CardRegionDetector {
         val working = Mat()
         val gray = Mat()
         val edges = Mat()
+        val threshold = Mat()
+        val thresholdEdges = Mat()
         val hierarchy = Mat()
         return try {
             Utils.bitmapToMat(bitmap, source)
@@ -41,12 +45,30 @@ class CardRegionDetector {
 
             Imgproc.cvtColor(working, gray, Imgproc.COLOR_RGBA2GRAY)
             Imgproc.GaussianBlur(gray, gray, Size(5.0, 5.0), 0.0)
-            Imgproc.Canny(gray, edges, 55.0, 165.0)
+            Imgproc.Canny(gray, edges, 32.0, 112.0)
+            Imgproc.adaptiveThreshold(
+                gray,
+                threshold,
+                255.0,
+                Imgproc.ADAPTIVE_THRESH_GAUSSIAN_C,
+                Imgproc.THRESH_BINARY,
+                31,
+                7.0,
+            )
+            Imgproc.Canny(threshold, thresholdEdges, 24.0, 92.0)
+            Core.bitwise_or(edges, thresholdEdges, edges)
             val kernel = Imgproc.getStructuringElement(
                 Imgproc.MORPH_RECT,
-                Size(5.0, 5.0),
+                Size(9.0, 9.0),
             )
-            Imgproc.morphologyEx(edges, edges, Imgproc.MORPH_CLOSE, kernel)
+            Imgproc.morphologyEx(
+                edges,
+                edges,
+                Imgproc.MORPH_CLOSE,
+                kernel,
+                Point(-1.0, -1.0),
+                2,
+            )
             kernel.release()
 
             val contours = mutableListOf<MatOfPoint>()
@@ -65,27 +87,15 @@ class CardRegionDetector {
             contours.forEach(MatOfPoint::release)
             try {
                 val best = candidates.maxByOrNull { it.score }
-                if (best == null || best.score < MIN_SCORE) return null
-
-                val originalPoints = best.points.map { point ->
-                    Point(point.x / scale, point.y / scale)
-                }
-                val ordered = orderCorners(originalPoints)
-                val normalized = ordered.map { point ->
-                    ScanPoint(
-                        x = (point.x / bitmap.width).toFloat().coerceIn(0f, 1f),
-                        y = (point.y / bitmap.height).toFloat().coerceIn(0f, 1f),
-                    )
+                if (best == null || best.score < MIN_SCORE) {
+                    return centeredFallback(bitmap, gray, edges, scale)
                 }
                 val mean = Core.mean(gray, best.mask)
-                DetectedCardRegion(
-                    detection = CardDetection(
-                        corners = normalized,
-                        confidence = best.score.coerceIn(0.0, 1.0),
-                        frameWidth = bitmap.width,
-                        frameHeight = bitmap.height,
-                    ),
-                    sourceCorners = ordered,
+                detectedRegion(
+                    bitmap = bitmap,
+                    scaledPoints = best.points,
+                    scale = scale,
+                    confidence = best.score,
                     brightness = mean.`val`[0],
                 )
             } finally {
@@ -96,6 +106,8 @@ class CardRegionDetector {
             working.release()
             gray.release()
             edges.release()
+            threshold.release()
+            thresholdEdges.release()
             hierarchy.release()
         }
     }
@@ -150,9 +162,10 @@ class CardRegionDetector {
         return try {
             val perimeter = Imgproc.arcLength(contour2f, true)
             if (perimeter <= 0.0) return null
-            Imgproc.approxPolyDP(contour2f, approximation, perimeter * 0.025, true)
-            val points = approximation.toArray()
-            if (points.size != 4) return null
+            val points = APPROXIMATION_FACTORS.firstNotNullOfOrNull { factor ->
+                Imgproc.approxPolyDP(contour2f, approximation, perimeter * factor, true)
+                approximation.toArray().takeIf { it.size == 4 }
+            } ?: return null
 
             val polygon = MatOfPoint(*points)
             try {
@@ -246,6 +259,87 @@ class CardRegionDetector {
     private fun distance(first: Point, second: Point): Double =
         hypot(first.x - second.x, first.y - second.y)
 
+    private fun centeredFallback(
+        bitmap: Bitmap,
+        gray: Mat,
+        edges: Mat,
+        scale: Double,
+    ): DetectedCardRegion? {
+        var width = gray.cols() * FALLBACK_WIDTH_RATIO
+        var height = width * CARD_ASPECT
+        val maximumHeight = gray.rows() * FALLBACK_HEIGHT_RATIO
+        if (height > maximumHeight) {
+            height = maximumHeight
+            width = height / CARD_ASPECT
+        }
+        val left = ((gray.cols() - width) / 2.0).toInt().coerceAtLeast(0)
+        val top = ((gray.rows() - height) / 2.0).toInt().coerceAtLeast(0)
+        val rect = Rect(
+            left,
+            top,
+            width.toInt().coerceAtLeast(1),
+            height.toInt().coerceAtLeast(1),
+        )
+        val grayRegion = gray.submat(rect)
+        val edgeRegion = edges.submat(rect)
+        val mean = MatOfDouble()
+        val deviation = MatOfDouble()
+        return try {
+            val edgeDensity = Core.countNonZero(edgeRegion).toDouble() / rect.area()
+            Core.meanStdDev(grayRegion, mean, deviation)
+            val brightness = mean.toArray().firstOrNull() ?: 0.0
+            val contrast = deviation.toArray().firstOrNull() ?: 0.0
+            if (edgeDensity < MIN_FALLBACK_EDGE_DENSITY || contrast < MIN_FALLBACK_CONTRAST) {
+                return null
+            }
+            val points = listOf(
+                Point(left.toDouble(), top.toDouble()),
+                Point(left + width, top.toDouble()),
+                Point(left + width, top + height),
+                Point(left.toDouble(), top + height),
+            )
+            detectedRegion(
+                bitmap = bitmap,
+                scaledPoints = points,
+                scale = scale,
+                confidence = FALLBACK_CONFIDENCE,
+                brightness = brightness,
+            )
+        } finally {
+            grayRegion.release()
+            edgeRegion.release()
+            mean.release()
+            deviation.release()
+        }
+    }
+
+    private fun detectedRegion(
+        bitmap: Bitmap,
+        scaledPoints: List<Point>,
+        scale: Double,
+        confidence: Double,
+        brightness: Double,
+    ): DetectedCardRegion {
+        val ordered = orderCorners(
+            scaledPoints.map { point -> Point(point.x / scale, point.y / scale) },
+        )
+        return DetectedCardRegion(
+            detection = CardDetection(
+                corners = ordered.map { point ->
+                    ScanPoint(
+                        x = (point.x / bitmap.width).toFloat().coerceIn(0f, 1f),
+                        y = (point.y / bitmap.height).toFloat().coerceIn(0f, 1f),
+                    )
+                },
+                confidence = confidence.coerceIn(0.0, 1.0),
+                frameWidth = bitmap.width,
+                frameHeight = bitmap.height,
+            ),
+            sourceCorners = ordered,
+            brightness = brightness,
+        )
+    }
+
     data class DetectedCardRegion(
         val detection: CardDetection,
         internal val sourceCorners: List<Point>,
@@ -260,16 +354,22 @@ class CardRegionDetector {
 
     private companion object {
         const val CARD_ASPECT = 88.0 / 63.0
-        const val ASPECT_TOLERANCE = 0.30
-        const val MIN_ASPECT = 1.16
-        const val MAX_ASPECT = 1.72
-        const val MIN_AREA_RATIO = 0.055
+        const val ASPECT_TOLERANCE = 0.42
+        const val MIN_ASPECT = 1.05
+        const val MAX_ASPECT = 1.88
+        const val MIN_AREA_RATIO = 0.035
         const val MAX_AREA_RATIO = 0.88
-        const val MIN_RECTANGULARITY = 0.70
-        const val MAX_CORNER_COSINE = 0.42
-        const val MIN_SCORE = 0.58
+        const val MIN_RECTANGULARITY = 0.52
+        const val MAX_CORNER_COSINE = 0.62
+        const val MIN_SCORE = 0.43
         const val MAX_ANALYSIS_EDGE = 720.0
         const val CARD_OUTPUT_WIDTH = 630
         const val CARD_OUTPUT_HEIGHT = 880
+        const val FALLBACK_WIDTH_RATIO = 0.68
+        const val FALLBACK_HEIGHT_RATIO = 0.76
+        const val MIN_FALLBACK_EDGE_DENSITY = 0.018
+        const val MIN_FALLBACK_CONTRAST = 18.0
+        const val FALLBACK_CONFIDENCE = 0.32
+        val APPROXIMATION_FACTORS = listOf(0.018, 0.028, 0.042, 0.06)
     }
 }

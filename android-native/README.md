@@ -18,11 +18,15 @@ focuses on fast, continuous camera recognition.
 - English and Korean secondary search modes
 - TCGdex market metadata when it is available
 - `pokebinder://` deep link support from the hosted web app
-- 63:88 Pokemon card guide
 - Full-frame card boundary detection without a fixed guide
+- Centered automatic fallback when a sleeve, hand, or low-contrast background breaks the border
 - Perspective correction to a 630 x 880 card image before matching
 - Automatic scan when the detected card area is bright and stable
 - On-device MediaPipe MobileNetV3 image embedding
+- On-device Japanese, Korean, and English OCR fallback for cards missing from the image index
+- TCGdex card-name and local-number verification after a scan
+- Private Supabase Storage fallback for newly released cards without provider images
+- Collection price and image refresh from current TCGdex detail responses
 - Japanese, Korean, and English scan modes
 - Supabase Edge Function image recognition client
 - Match confidence, card metadata, and market price overlay
@@ -74,8 +78,8 @@ matching begins after the Edge Function is configured.
 
 ## Recognition Function Contract
 
-The card image stays on the Android device. The app converts it to a normalized
-1024-dimension embedding and sends:
+The card image stays on the Android device during normal embedding matching. The
+app converts it to a normalized 1024-dimension embedding and sends:
 
 ```json
 {
@@ -86,6 +90,11 @@ The card image stays on the Android device. The app converts it to a normalized
   "minSimilarity": 0.55
 }
 ```
+
+If TCGdex has no reference image, the app reads the card name and local number
+on-device and searches TCGdex directly. Only when the matched card still has no
+provider image does the app upload the perspective-corrected scan to the private
+`card-scans` bucket and save a signed thumbnail URL.
 
 The function may return the card object directly or inside a `card` property:
 

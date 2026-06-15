@@ -93,6 +93,7 @@ Deno.serve(async (request) => {
       number: row.card_number,
       rarity: row.rarity,
       imageUrl: row.image_high_url ?? row.image_url,
+      imageHighUrl: row.image_high_url,
       marketPrice: row.market_price,
       currency: row.currency ?? defaultCurrency(language),
       priceSource: row.price_source,

@@ -23,8 +23,8 @@ android {
         applicationId = "com.pokebinder.scanner"
         minSdk = 26
         targetSdk = 33
-        versionCode = 6
-        versionName = "0.6.0"
+        versionCode = 7
+        versionName = "0.7.0"
         ndk {
             abiFilters += setOf("arm64-v8a")
         }
@@ -104,6 +104,10 @@ dependencies {
     implementation("com.squareup.okhttp3:okhttp:4.10.0")
     implementation("io.coil-kt:coil-compose:2.2.2")
     implementation("com.google.mediapipe:tasks-vision:0.10.35")
+    implementation("com.google.mlkit:text-recognition:16.0.1")
+    implementation("com.google.mlkit:text-recognition-japanese:16.0.1")
+    implementation("com.google.mlkit:text-recognition-korean:16.0.1")
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-play-services:1.6.4")
     implementation("org.opencv:opencv:4.9.0")
 
     testImplementation("junit:junit:4.13.2")

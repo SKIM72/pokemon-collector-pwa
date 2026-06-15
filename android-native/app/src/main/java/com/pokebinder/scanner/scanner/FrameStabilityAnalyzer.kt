@@ -7,6 +7,7 @@ import androidx.camera.core.ImageProxy
 import com.pokebinder.scanner.model.CardDetection
 import com.pokebinder.scanner.model.FrameProbe
 import java.io.ByteArrayOutputStream
+import java.nio.ByteOrder
 import kotlin.math.hypot
 
 class FrameStabilityAnalyzer(
@@ -106,8 +107,19 @@ class FrameStabilityAnalyzer(
 
     private fun ImageProxy.toRgbaBitmap(): Bitmap? {
         val plane = planes.firstOrNull() ?: return null
-        val buffer = plane.buffer
+        val buffer = plane.buffer.duplicate().order(ByteOrder.BIG_ENDIAN)
         val pixels = IntArray(width * height)
+        if (plane.pixelStride == 4) {
+            for (y in 0 until height) {
+                buffer.position(y * plane.rowStride)
+                buffer.slice()
+                    .order(ByteOrder.BIG_ENDIAN)
+                    .asIntBuffer()
+                    .get(pixels, y * width, width)
+            }
+            return Bitmap.createBitmap(pixels, width, height, Bitmap.Config.ARGB_8888)
+        }
+
         for (y in 0 until height) {
             for (x in 0 until width) {
                 val index = y * plane.rowStride + x * plane.pixelStride
@@ -126,8 +138,8 @@ class FrameStabilityAnalyzer(
     private companion object {
         const val MIN_BRIGHTNESS = 32.0
         const val MAX_BRIGHTNESS = 238.0
-        const val MAX_CORNER_MOTION = 0.018
-        const val REQUIRED_STABLE_FRAMES = 3
-        const val CAPTURE_COOLDOWN_MS = 1_350L
+        const val MAX_CORNER_MOTION = 0.035
+        const val REQUIRED_STABLE_FRAMES = 2
+        const val CAPTURE_COOLDOWN_MS = 1_700L
     }
 }
