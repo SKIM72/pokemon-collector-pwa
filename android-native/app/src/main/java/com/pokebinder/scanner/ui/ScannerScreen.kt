@@ -31,6 +31,7 @@ import androidx.compose.material.icons.rounded.DeleteSweep
 import androidx.compose.material.icons.rounded.FlashOff
 import androidx.compose.material.icons.rounded.FlashOn
 import androidx.compose.material.icons.rounded.Remove
+import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -38,6 +39,7 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -157,6 +159,7 @@ fun ScannerScreen(
             PriceBadge(
                 price = state.convertedPrice(state.currentMatch),
                 currency = state.displayCurrency,
+                priceSource = state.currentMatch.priceSource,
                 modifier = Modifier
                     .align(Alignment.CenterEnd)
                     .padding(end = 14.dp, bottom = 120.dp),
@@ -474,7 +477,9 @@ private fun ScannerBottomPanel(
                                 fontSize = 16.sp,
                             )
                             Text(
-                                text = state.displayCurrency,
+                                text = "${state.displayCurrency} · ${
+                                    priceSourceLabel(card.priceSource)
+                                }",
                                 color = Color(0xFF85909D),
                                 fontSize = 11.sp,
                             )
@@ -483,36 +488,63 @@ private fun ScannerBottomPanel(
                 }
             }
 
-            if (state.scanAwaitingConfirmation || state.scanAdded) {
+            if (state.scanAwaitingConfirmation) {
+                Spacer(modifier = Modifier.height(12.dp))
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(9.dp),
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    OutlinedButton(
+                        onClick = onNextScan,
+                        enabled = !state.scanSaving,
+                        shape = RoundedCornerShape(13.dp),
+                        modifier = Modifier
+                            .weight(0.8f)
+                            .height(50.dp),
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.Refresh,
+                            contentDescription = null,
+                            modifier = Modifier.size(18.dp),
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("재촬영", fontWeight = FontWeight.Bold)
+                    }
+                    Button(
+                        onClick = onConfirmScan,
+                        enabled = !state.scanSaving,
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = MaterialTheme.colorScheme.primary,
+                            contentColor = MaterialTheme.colorScheme.onPrimary,
+                        ),
+                        shape = RoundedCornerShape(13.dp),
+                        modifier = Modifier
+                            .weight(1.2f)
+                            .height(50.dp),
+                    ) {
+                        if (state.scanSaving) {
+                            CircularProgressIndicator(
+                                color = MaterialTheme.colorScheme.onPrimary,
+                                strokeWidth = 2.dp,
+                                modifier = Modifier.size(20.dp),
+                            )
+                        } else {
+                            Text("컬렉션에 1장 추가", fontWeight = FontWeight.Bold)
+                        }
+                    }
+                }
+            }
+
+            if (state.scanAdded) {
                 Spacer(modifier = Modifier.height(12.dp))
                 Button(
-                    onClick = if (state.scanAdded) onNextScan else onConfirmScan,
-                    enabled = !state.scanSaving,
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = MaterialTheme.colorScheme.primary,
-                        contentColor = MaterialTheme.colorScheme.onPrimary,
-                    ),
+                    onClick = onNextScan,
                     shape = RoundedCornerShape(13.dp),
                     modifier = Modifier
                         .fillMaxWidth()
                         .height(50.dp),
                 ) {
-                    if (state.scanSaving) {
-                        CircularProgressIndicator(
-                            color = MaterialTheme.colorScheme.onPrimary,
-                            strokeWidth = 2.dp,
-                            modifier = Modifier.size(20.dp),
-                        )
-                    } else {
-                        Text(
-                            text = if (state.scanAdded) {
-                                "다음 카드 스캔"
-                            } else {
-                                "컬렉션에 1장 추가"
-                            },
-                            fontWeight = FontWeight.Bold,
-                        )
-                    }
+                    Text("다음 카드 스캔", fontWeight = FontWeight.Bold)
                 }
             }
 
@@ -713,6 +745,7 @@ private fun SmallQuantityButton(
 private fun PriceBadge(
     price: Double,
     currency: String,
+    priceSource: String,
     modifier: Modifier = Modifier,
 ) {
     Surface(
@@ -722,7 +755,7 @@ private fun PriceBadge(
     ) {
         Column(modifier = Modifier.padding(horizontal = 13.dp, vertical = 9.dp)) {
             Text(
-                text = "MARKET",
+                text = priceSourceLabel(priceSource).uppercase(Locale.ROOT),
                 color = MaterialTheme.colorScheme.primary,
                 fontSize = 10.sp,
                 fontWeight = FontWeight.Bold,
@@ -735,6 +768,14 @@ private fun PriceBadge(
             )
         }
     }
+}
+
+private fun priceSourceLabel(source: String): String = when (source) {
+    "estimated-rarity" -> "추정가"
+    "pokemon-tcg-api" -> "TCGPlayer"
+    "pokemon-tcg-api-cardmarket", "cardmarket" -> "Cardmarket"
+    "tcgplayer" -> "TCGPlayer"
+    else -> "시장가"
 }
 
 @Composable

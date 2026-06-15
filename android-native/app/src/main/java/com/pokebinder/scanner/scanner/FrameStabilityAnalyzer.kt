@@ -107,15 +107,19 @@ class FrameStabilityAnalyzer(
 
     private fun ImageProxy.toRgbaBitmap(): Bitmap? {
         val plane = planes.firstOrNull() ?: return null
-        val buffer = plane.buffer.duplicate().order(ByteOrder.BIG_ENDIAN)
+        val buffer = plane.buffer.duplicate()
         val pixels = IntArray(width * height)
         if (plane.pixelStride == 4) {
+            val rowPixels = IntArray(width)
             for (y in 0 until height) {
                 buffer.position(y * plane.rowStride)
                 buffer.slice()
-                    .order(ByteOrder.BIG_ENDIAN)
+                    .order(ByteOrder.LITTLE_ENDIAN)
                     .asIntBuffer()
-                    .get(pixels, y * width, width)
+                    .get(rowPixels, 0, width)
+                for (x in 0 until width) {
+                    pixels[y * width + x] = packedRgbaToArgb(rowPixels[x])
+                }
             }
             return Bitmap.createBitmap(pixels, width, height, Bitmap.Config.ARGB_8888)
         }
@@ -124,12 +128,12 @@ class FrameStabilityAnalyzer(
             for (x in 0 until width) {
                 val index = y * plane.rowStride + x * plane.pixelStride
                 if (index + 3 >= buffer.limit()) continue
-                val alpha = buffer.get(index).toInt() and 0xff
-                val red = buffer.get(index + 1).toInt() and 0xff
-                val green = buffer.get(index + 2).toInt() and 0xff
-                val blue = buffer.get(index + 3).toInt() and 0xff
-                pixels[y * width + x] =
-                    (alpha shl 24) or (red shl 16) or (green shl 8) or blue
+                pixels[y * width + x] = rgbaToArgb(
+                    red = buffer.get(index).toInt() and 0xff,
+                    green = buffer.get(index + 1).toInt() and 0xff,
+                    blue = buffer.get(index + 2).toInt() and 0xff,
+                    alpha = buffer.get(index + 3).toInt() and 0xff,
+                )
             }
         }
         return Bitmap.createBitmap(pixels, width, height, Bitmap.Config.ARGB_8888)
@@ -143,3 +147,15 @@ class FrameStabilityAnalyzer(
         const val CAPTURE_COOLDOWN_MS = 1_700L
     }
 }
+
+internal fun rgbaToArgb(
+    red: Int,
+    green: Int,
+    blue: Int,
+    alpha: Int,
+): Int = (alpha shl 24) or (red shl 16) or (green shl 8) or blue
+
+internal fun packedRgbaToArgb(rgba: Int): Int =
+    (rgba and 0xFF00FF00.toInt()) or
+        ((rgba and 0x00FF0000) ushr 16) or
+        ((rgba and 0x000000FF) shl 16)

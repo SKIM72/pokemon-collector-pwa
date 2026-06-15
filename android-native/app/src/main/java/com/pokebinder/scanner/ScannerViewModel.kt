@@ -705,7 +705,12 @@ class ScannerViewModel(application: Application) : AndroidViewModel(application)
     ) {
         val targets = cards.filter { item ->
             item.card.source == "tcgdex" &&
-                (refreshAll || item.card.marketPrice == null || item.card.imageUrl == null)
+                (
+                    refreshAll ||
+                        item.card.marketPrice == null ||
+                        item.card.priceSource == "estimated-rarity" ||
+                        isScanFallbackImage(item.card.imageUrl)
+                    )
         }
         if (targets.isEmpty()) return
 
@@ -799,14 +804,31 @@ class ScannerViewModel(application: Application) : AndroidViewModel(application)
         outcome: RecognitionOutcome.Match,
         jpegBytes: ByteArray,
     ): RecognitionOutcome.Match {
-        var card = runCatching {
+        val detailedCandidates = outcome.candidates
+            .distinctBy { "${it.language.code}:${it.id}" }
+            .take(6)
+            .chunked(3)
+            .flatMap { chunk ->
+                coroutineScope {
+                    chunk.map { candidate ->
+                        async {
+                            runCatching {
+                                cardSearchRepository.fetchCard(candidate)
+                            }.getOrDefault(candidate)
+                        }
+                    }.awaitAll()
+                }
+            }
+        var card = detailedCandidates.firstOrNull {
+            sameCard(it, outcome.card)
+        } ?: runCatching {
             cardSearchRepository.fetchCard(outcome.card)
         }.getOrDefault(outcome.card)
         if (card.imageUrl == null) {
             val localUrl = scanImageRepository.saveLocal(card, jpegBytes)
             card = card.copy(imageUrl = localUrl, imageHighUrl = localUrl)
         }
-        val candidates = outcome.candidates.map {
+        val candidates = detailedCandidates.map {
             if (it.id == card.id && it.language == card.language) card else it
         }.let { current ->
             if (current.none { it.id == card.id && it.language == card.language }) {
@@ -955,3 +977,8 @@ private fun sameCard(
 ): Boolean = first.id == second.id &&
     first.language == second.language &&
     first.source == second.source
+
+private fun isScanFallbackImage(value: String?): Boolean =
+    value.isNullOrBlank() ||
+        value.startsWith("file:") ||
+        value.contains("/card-scans/")

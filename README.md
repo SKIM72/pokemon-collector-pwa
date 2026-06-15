@@ -21,6 +21,8 @@ Personal Pokemon TCG collection PWA built with React + Vite.
 - Android Japanese-first multilingual TCGdex search
 - Android unified multilingual search, sorting, and JPY/KRW/USD conversion
 - Android scan candidate confirmation, tap-to-focus, and torch control
+- Android official Japanese card image fallback and English Pokemon TCG API fallback
+- Android retake flow and corrected scan-image color conversion
 - Web-to-Android intent and deep-link handoff
 - On-device MediaPipe image embeddings with Supabase pgvector candidate search
 - JSON export/import backup

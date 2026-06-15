@@ -15,6 +15,8 @@ focuses on fast, continuous camera recognition.
 - Shared collection synchronization with the React PWA
 - Scan candidate review and explicit collection confirmation before cloud saving
 - Unified Japanese, Korean, and English TCGdex search with multilingual aliases
+- Official Japanese Pokemon Card database image fallback matched by set and card number
+- Pokemon TCG API image and market-price fallback for English cards
 - Search sorting by release date, name, and converted market price
 - Collection sorting by release date, added date, name, and converted market price
 - TCGdex market metadata when it is available
@@ -28,6 +30,7 @@ focuses on fast, continuous camera recognition.
 - TCGdex card-name and local-number verification after a scan
 - Private Supabase Storage fallback for newly released cards without provider images
 - On-device scan-image fallback when a provider image does not exist
+- Correct CameraX RGBA color conversion for saved scan images
 - Collection price and image refresh from current TCGdex detail responses
 - JPY default display currency with JPY, KRW, and USD settings
 - Japanese, Korean, and English scan modes
@@ -35,6 +38,8 @@ focuses on fast, continuous camera recognition.
 - Match confidence, card metadata, and market price overlay
 - Horizontal candidate list with manual correction
 - Tap-to-focus, torch control, duplicate quantity merging, and a running scan total
+- Retake action before collection confirmation when recognition candidates are incorrect
+- Clearly labeled rarity-based estimate when no provider publishes a market price
 - Light, dark, and system theme controls
 
 The collection is stored in the existing Supabase `collection_cards` table, so

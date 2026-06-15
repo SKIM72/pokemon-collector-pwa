@@ -889,6 +889,11 @@ private fun CollectionCard(
                     fontWeight = FontWeight.Bold,
                     fontSize = 16.sp,
                 )
+                Text(
+                    text = priceSourceLabel(item.card.priceSource),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    fontSize = 11.sp,
+                )
                 Spacer(modifier = Modifier.height(8.dp))
                 Surface(
                     color = MaterialTheme.colorScheme.surfaceVariant,
@@ -1150,10 +1155,12 @@ private fun SearchResultCard(
                 card.marketPrice?.let {
                     Spacer(modifier = Modifier.height(5.dp))
                     Text(
-                        text = formatMoney(
-                            state.convertedPrice(card),
-                            state.displayCurrency,
-                        ),
+                        text = "${
+                            formatMoney(
+                                state.convertedPrice(card),
+                                state.displayCurrency,
+                            )
+                        } · ${priceSourceLabel(card.priceSource)}",
                         color = MaterialTheme.colorScheme.primary,
                         fontWeight = FontWeight.Bold,
                         fontSize = 14.sp,
@@ -1617,6 +1624,14 @@ private fun formatMoney(value: Double, currency: String): String {
         else -> "$currency "
     }
     return "$symbol${formatter.format(value)}"
+}
+
+private fun priceSourceLabel(source: String): String = when (source) {
+    "estimated-rarity" -> "추정가"
+    "pokemon-tcg-api" -> "TCGPlayer"
+    "pokemon-tcg-api-cardmarket", "cardmarket" -> "Cardmarket"
+    "tcgplayer" -> "TCGPlayer"
+    else -> "시장가"
 }
 
 private fun collectionKey(item: SessionCard): String = item.collectionKey

@@ -24,6 +24,7 @@ class TcgDexRepository(
         .build(),
 ) {
     private val setReleaseDates = ConcurrentHashMap<String, String>()
+    private val metadataFallback = CardMetadataFallbackRepository(client)
 
     suspend fun searchAllLanguages(query: String): List<RecognizedCard> =
         withContext(Dispatchers.IO) {
@@ -69,9 +70,11 @@ class TcgDexRepository(
                 .get()
                 .build()
             client.newCall(request).execute().use { response ->
-                if (!response.isSuccessful) return@withContext card
+                if (!response.isSuccessful) {
+                    return@withContext metadataFallback.enrich(card)
+                }
                 val body = response.body?.string().orEmpty()
-                if (body.isBlank()) return@withContext card
+                if (body.isBlank()) return@withContext metadataFallback.enrich(card)
                 val json = JSONObject(body)
                 val parsed = parseDetailed(json, card.language)
                 val setId = parsed?.setId.orEmpty()
@@ -80,13 +83,14 @@ class TcgDexRepository(
                 } else {
                     fetchSetReleaseDate(setId, card.language)
                 }
-                parsed?.copy(
+                val merged = parsed?.copy(
                     confidence = card.confidence,
                     imageUrl = parsed.imageUrl ?: card.imageUrl,
                     imageHighUrl = parsed.imageHighUrl ?: card.imageHighUrl,
                     releaseDate = releaseDate,
                 )
                     ?: card
+                metadataFallback.enrich(merged)
             }
         }
 
