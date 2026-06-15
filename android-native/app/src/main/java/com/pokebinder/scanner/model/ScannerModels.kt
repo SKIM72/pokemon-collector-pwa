@@ -131,6 +131,8 @@ data class ScannerUiState(
     val scanSaving: Boolean = false,
     val displayCurrency: String = "JPY",
     val currencyRates: Map<String, Double> = DEFAULT_CURRENCY_RATES,
+    val noticeMessage: String = "",
+    val noticeId: Long = 0L,
 ) {
     val totalCards: Int
         get() = sessionCards.sumOf { it.quantity }

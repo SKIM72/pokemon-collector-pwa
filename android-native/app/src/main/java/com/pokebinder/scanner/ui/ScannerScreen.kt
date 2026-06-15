@@ -25,12 +25,10 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.DeleteSweep
 import androidx.compose.material.icons.rounded.FlashOff
 import androidx.compose.material.icons.rounded.FlashOn
-import androidx.compose.material.icons.rounded.Remove
 import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material3.Button
@@ -80,7 +78,6 @@ fun ScannerScreen(
     onCandidateSelected: (RecognizedCard) -> Unit,
     onConfirmScan: () -> Unit,
     onNextScan: () -> Unit,
-    onQuantityChanged: (String, Int) -> Unit,
     onClearSession: () -> Unit,
     onClose: () -> Unit,
 ) {
@@ -171,7 +168,6 @@ fun ScannerScreen(
             onCandidateSelected = onCandidateSelected,
             onConfirmScan = onConfirmScan,
             onNextScan = onNextScan,
-            onQuantityChanged = onQuantityChanged,
             onClearSession = onClearSession,
             modifier = Modifier.align(Alignment.BottomCenter),
         )
@@ -374,7 +370,6 @@ private fun ScannerBottomPanel(
     onCandidateSelected: (RecognizedCard) -> Unit,
     onConfirmScan: () -> Unit,
     onNextScan: () -> Unit,
-    onQuantityChanged: (String, Int) -> Unit,
     onClearSession: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -603,7 +598,7 @@ private fun ScannerBottomPanel(
                         .horizontalScroll(rememberScrollState()),
                 ) {
                     state.recentScanCards.forEach { item ->
-                        SessionCardItem(item, onQuantityChanged)
+                        SessionCardItem(item)
                     }
                 }
             }
@@ -670,7 +665,6 @@ private fun CandidateCardItem(
 @Composable
 private fun SessionCardItem(
     item: SessionCard,
-    onQuantityChanged: (String, Int) -> Unit,
 ) {
     Surface(
         color = Color(0xFF171D24),
@@ -699,45 +693,14 @@ private fun SessionCardItem(
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    SmallQuantityButton(
-                        icon = Icons.Rounded.Remove,
-                        label = "수량 줄이기",
-                        onClick = { onQuantityChanged(item.collectionKey, -1) },
-                    )
-                    Text(
-                        text = item.quantity.toString(),
-                        color = Color.White,
-                        fontWeight = FontWeight.Bold,
-                        modifier = Modifier.padding(horizontal = 5.dp),
-                    )
-                    SmallQuantityButton(
-                        icon = Icons.Rounded.Add,
-                        label = "수량 늘리기",
-                        onClick = { onQuantityChanged(item.collectionKey, 1) },
-                    )
-                }
+                Text(
+                    text = "${item.quantity}장",
+                    color = MaterialTheme.colorScheme.primary,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 12.sp,
+                )
             }
         }
-    }
-}
-
-@Composable
-private fun SmallQuantityButton(
-    icon: androidx.compose.ui.graphics.vector.ImageVector,
-    label: String,
-    onClick: () -> Unit,
-) {
-    IconButton(
-        onClick = onClick,
-        modifier = Modifier.size(28.dp),
-    ) {
-        Icon(
-            imageVector = icon,
-            contentDescription = label,
-            tint = MaterialTheme.colorScheme.primary,
-            modifier = Modifier.size(16.dp),
-        )
     }
 }
 

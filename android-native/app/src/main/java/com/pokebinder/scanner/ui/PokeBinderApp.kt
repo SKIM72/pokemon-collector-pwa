@@ -2,6 +2,7 @@
 
 package com.pokebinder.scanner.ui
 
+import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -27,6 +28,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.ArrowDownward
@@ -34,6 +36,7 @@ import androidx.compose.material.icons.rounded.ArrowUpward
 import androidx.compose.material.icons.rounded.CameraAlt
 import androidx.compose.material.icons.rounded.CollectionsBookmark
 import androidx.compose.material.icons.rounded.DarkMode
+import androidx.compose.material.icons.rounded.Delete
 import androidx.compose.material.icons.rounded.Favorite
 import androidx.compose.material.icons.rounded.FavoriteBorder
 import androidx.compose.material.icons.rounded.LightMode
@@ -45,6 +48,8 @@ import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material.icons.rounded.Security
 import androidx.compose.material.icons.rounded.Settings
 import androidx.compose.material.icons.rounded.Smartphone
+import androidx.compose.material.icons.rounded.Save
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -62,8 +67,10 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -72,6 +79,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
@@ -122,7 +130,8 @@ fun PokeBinderApp(
     onCandidateSelected: (RecognizedCard) -> Unit,
     onConfirmScan: () -> Unit,
     onNextScan: () -> Unit,
-    onQuantityChanged: (String, Int) -> Unit,
+    onQuantitySaved: (String, Int) -> Unit,
+    onCardDeleted: (String) -> Unit,
     onFavoriteToggle: (String) -> Unit,
     onClearSession: () -> Unit,
     onSignIn: (String, String) -> Unit,
@@ -140,6 +149,7 @@ fun PokeBinderApp(
     onPasswordUpdate: (String, String) -> Unit,
     onSignOut: () -> Unit,
 ) {
+    val context = LocalContext.current
     var destinationName by rememberSaveable {
         mutableStateOf(AppDestination.COLLECTION.name)
     }
@@ -147,6 +157,12 @@ fun PokeBinderApp(
         mutableStateOf(AppDestination.COLLECTION.name)
     }
     val destination = AppDestination.valueOf(destinationName)
+
+    LaunchedEffect(state.noticeId) {
+        if (state.noticeId > 0L && state.noticeMessage.isNotBlank()) {
+            Toast.makeText(context, state.noticeMessage, Toast.LENGTH_SHORT).show()
+        }
+    }
 
     when (state.authStatus) {
         AuthStatus.RESTORING -> {
@@ -189,7 +205,6 @@ fun PokeBinderApp(
             onCandidateSelected = onCandidateSelected,
             onConfirmScan = onConfirmScan,
             onNextScan = onNextScan,
-            onQuantityChanged = onQuantityChanged,
             onClearSession = onClearSession,
             onClose = ::closeScanner,
         )
@@ -227,7 +242,8 @@ fun PokeBinderApp(
                 cards = state.sortedSessionCards,
                 emptyTitle = "아직 등록된 카드가 없어요",
                 onScan = { openDestination(AppDestination.SCAN) },
-                onQuantityChanged = onQuantityChanged,
+                onQuantitySaved = onQuantitySaved,
+                onCardDeleted = onCardDeleted,
                 onFavoriteToggle = onFavoriteToggle,
                 onRefresh = onRefreshCollection,
                 onSortFieldChanged = onCollectionSortFieldChanged,
@@ -240,7 +256,8 @@ fun PokeBinderApp(
                 cards = state.sortedFavoriteCards,
                 emptyTitle = "즐겨찾기한 카드가 없어요",
                 onScan = { openDestination(AppDestination.SCAN) },
-                onQuantityChanged = onQuantityChanged,
+                onQuantitySaved = onQuantitySaved,
+                onCardDeleted = onCardDeleted,
                 onFavoriteToggle = onFavoriteToggle,
                 onRefresh = onRefreshCollection,
                 onSortFieldChanged = onCollectionSortFieldChanged,
@@ -634,13 +651,16 @@ private fun CollectionScreen(
     cards: List<SessionCard>,
     emptyTitle: String,
     onScan: () -> Unit,
-    onQuantityChanged: (String, Int) -> Unit,
+    onQuantitySaved: (String, Int) -> Unit,
+    onCardDeleted: (String) -> Unit,
     onFavoriteToggle: (String) -> Unit,
     onRefresh: () -> Unit,
     onSortFieldChanged: (CollectionSortField) -> Unit,
     onSortDirectionToggle: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    var selectedCard by remember { mutableStateOf<SessionCard?>(null) }
+
     LazyColumn(
         verticalArrangement = Arrangement.spacedBy(12.dp),
         contentPadding = PaddingValues(horizontal = 18.dp, vertical = 10.dp),
@@ -728,7 +748,9 @@ private fun CollectionScreen(
                     state = state,
                     item = item,
                     isFavorite = item.collectionKey in state.favoriteCardIds,
-                    onQuantityChanged = onQuantityChanged,
+                    onOpenDetails = { selectedCard = item },
+                    onQuantitySaved = onQuantitySaved,
+                    onCardDeleted = onCardDeleted,
                     onFavoriteToggle = onFavoriteToggle,
                 )
             }
@@ -736,6 +758,14 @@ private fun CollectionScreen(
         item {
             Spacer(modifier = Modifier.height(8.dp))
         }
+    }
+
+    selectedCard?.let { item ->
+        CardDetailDialog(
+            state = state,
+            item = item,
+            onDismiss = { selectedCard = null },
+        )
     }
 }
 
@@ -815,13 +845,24 @@ private fun CollectionCard(
     state: ScannerUiState,
     item: SessionCard,
     isFavorite: Boolean,
-    onQuantityChanged: (String, Int) -> Unit,
+    onOpenDetails: () -> Unit,
+    onQuantitySaved: (String, Int) -> Unit,
+    onCardDeleted: (String) -> Unit,
     onFavoriteToggle: (String) -> Unit,
 ) {
+    var draftQuantity by rememberSaveable(item.collectionKey, item.quantity) {
+        mutableStateOf(item.quantity)
+    }
+    var showDeleteConfirmation by rememberSaveable(item.collectionKey) {
+        mutableStateOf(false)
+    }
+
     Surface(
         color = MaterialTheme.colorScheme.surface,
         shape = RoundedCornerShape(16.dp),
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onOpenDetails),
     ) {
         Row(
             verticalAlignment = Alignment.CenterVertically,
@@ -876,12 +917,22 @@ private fun CollectionCard(
                             },
                         )
                     }
+                    IconButton(
+                        onClick = { showDeleteConfirmation = true },
+                        modifier = Modifier.size(36.dp),
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.Delete,
+                            contentDescription = "카드 삭제",
+                            tint = MaterialTheme.colorScheme.error,
+                        )
+                    }
                 }
                 Spacer(modifier = Modifier.height(7.dp))
                 Text(
                     text = item.card.marketPrice?.let {
                         formatMoney(
-                            state.convertedPrice(item.card) * item.quantity,
+                            state.convertedPrice(item.card) * draftQuantity,
                             state.displayCurrency,
                         )
                     } ?: "가격 확인 중",
@@ -895,42 +946,206 @@ private fun CollectionCard(
                     fontSize = 11.sp,
                 )
                 Spacer(modifier = Modifier.height(8.dp))
-                Surface(
-                    color = MaterialTheme.colorScheme.surfaceVariant,
-                    shape = RoundedCornerShape(10.dp),
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.fillMaxWidth(),
                 ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        modifier = Modifier.fillMaxWidth(),
+                    Surface(
+                        color = MaterialTheme.colorScheme.surfaceVariant,
+                        shape = RoundedCornerShape(10.dp),
+                        modifier = Modifier.weight(1f),
                     ) {
-                        IconButton(
-                            onClick = { onQuantityChanged(item.collectionKey, -1) },
-                            modifier = Modifier.size(38.dp),
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            modifier = Modifier.fillMaxWidth(),
                         ) {
-                            Icon(
-                                imageVector = Icons.Rounded.Remove,
-                                contentDescription = "수량 줄이기",
+                            IconButton(
+                                onClick = {
+                                    if (draftQuantity == 1) {
+                                        showDeleteConfirmation = true
+                                    } else {
+                                        draftQuantity -= 1
+                                    }
+                                },
+                                modifier = Modifier.size(38.dp),
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Rounded.Remove,
+                                    contentDescription = "수량 줄이기",
+                                )
+                            }
+                            Text(
+                                text = "${draftQuantity}장",
+                                color = MaterialTheme.colorScheme.onSurface,
+                                fontWeight = FontWeight.Bold,
                             )
+                            IconButton(
+                                onClick = { draftQuantity += 1 },
+                                modifier = Modifier.size(38.dp),
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Rounded.Add,
+                                    contentDescription = "수량 늘리기",
+                                )
+                            }
                         }
-                        Text(
-                            text = "${item.quantity}장",
-                            color = MaterialTheme.colorScheme.onSurface,
-                            fontWeight = FontWeight.Bold,
+                    }
+                    Button(
+                        onClick = {
+                            onQuantitySaved(item.collectionKey, draftQuantity)
+                        },
+                        enabled = draftQuantity != item.quantity && !state.isSyncing,
+                        shape = RoundedCornerShape(10.dp),
+                        contentPadding = PaddingValues(horizontal = 12.dp),
+                        modifier = Modifier.height(38.dp),
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.Save,
+                            contentDescription = null,
+                            modifier = Modifier.size(17.dp),
                         )
-                        IconButton(
-                            onClick = { onQuantityChanged(item.collectionKey, 1) },
-                            modifier = Modifier.size(38.dp),
-                        ) {
-                            Icon(
-                                imageVector = Icons.Rounded.Add,
-                                contentDescription = "수량 늘리기",
-                            )
-                        }
+                        Spacer(modifier = Modifier.width(5.dp))
+                        Text("저장")
                     }
                 }
             }
         }
+    }
+
+    if (showDeleteConfirmation) {
+        DeleteCardDialog(
+            item = item,
+            onDismiss = { showDeleteConfirmation = false },
+            onConfirm = {
+                showDeleteConfirmation = false
+                onCardDeleted(item.collectionKey)
+            },
+        )
+    }
+}
+
+@Composable
+private fun DeleteCardDialog(
+    item: SessionCard,
+    onDismiss: () -> Unit,
+    onConfirm: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("컬렉션에서 삭제할까요?") },
+        text = {
+            Text(
+                "${item.card.name} ${item.quantity}장을 모두 삭제합니다. " +
+                    "삭제한 뒤에는 되돌릴 수 없습니다.",
+            )
+        },
+        confirmButton = {
+            Button(
+                onClick = onConfirm,
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = MaterialTheme.colorScheme.error,
+                    contentColor = MaterialTheme.colorScheme.onError,
+                ),
+            ) {
+                Text("삭제")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("취소")
+            }
+        },
+    )
+}
+
+@Composable
+private fun CardDetailDialog(
+    state: ScannerUiState,
+    item: SessionCard,
+    onDismiss: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Text(
+                text = item.card.name,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
+        },
+        text = {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .verticalScroll(rememberScrollState()),
+            ) {
+                CardArtwork(
+                    card = item.card,
+                    contentDescription = item.card.name,
+                    contentScale = ContentScale.Fit,
+                    modifier = Modifier
+                        .width(190.dp)
+                        .height(266.dp)
+                        .align(Alignment.CenterHorizontally)
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(MaterialTheme.colorScheme.surfaceVariant),
+                )
+                Spacer(modifier = Modifier.height(18.dp))
+                CardDetailRow("언어", item.card.language.label)
+                CardDetailRow("세트", item.card.setName)
+                CardDetailRow("카드 번호", "#${item.card.number}")
+                CardDetailRow("희귀도", item.card.rarity.ifBlank { "정보 없음" })
+                CardDetailRow("출시일", item.card.releaseDate.ifBlank { "정보 없음" })
+                CardDetailRow("상태", item.condition)
+                CardDetailRow("타입", item.finish)
+                CardDetailRow("보유 수량", "${item.quantity}장")
+                CardDetailRow(
+                    "카드 가격",
+                    item.card.marketPrice?.let {
+                        formatMoney(
+                            state.convertedPrice(item.card),
+                            state.displayCurrency,
+                        )
+                    } ?: "가격 확인 중",
+                )
+                CardDetailRow("가격 출처", priceSourceLabel(item.card.priceSource))
+                CardDetailRow("데이터 출처", item.card.source)
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) {
+                Text("닫기")
+            }
+        },
+    )
+}
+
+@Composable
+private fun CardDetailRow(
+    label: String,
+    value: String,
+) {
+    Row(
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 5.dp),
+    ) {
+        Text(
+            text = label,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            fontSize = 12.sp,
+            modifier = Modifier.width(72.dp),
+        )
+        Text(
+            text = value,
+            color = MaterialTheme.colorScheme.onSurface,
+            fontSize = 13.sp,
+            fontWeight = FontWeight.SemiBold,
+            modifier = Modifier.weight(1f),
+        )
     }
 }
 

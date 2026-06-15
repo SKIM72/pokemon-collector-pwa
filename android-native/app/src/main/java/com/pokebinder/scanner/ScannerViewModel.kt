@@ -250,6 +250,13 @@ class ScannerViewModel(application: Application) : AndroidViewModel(application)
                         },
                     )
                 }
+                showNotice(
+                    if (saved) {
+                        "${detailed.name} 카드가 컬렉션에 추가되었습니다."
+                    } else {
+                        "카드는 추가했지만 클라우드 저장에 실패했습니다."
+                    },
+                )
             }.onFailure { error ->
                 mutableState.update {
                     it.copy(
@@ -430,6 +437,13 @@ class ScannerViewModel(application: Application) : AndroidViewModel(application)
                     },
                 )
             }
+            showNotice(
+                if (saved) {
+                    "${cardToSave.name} 카드가 컬렉션에 추가되었습니다."
+                } else {
+                    "카드는 추가했지만 클라우드 저장에 실패했습니다."
+                },
+            )
         }
     }
 
@@ -450,36 +464,54 @@ class ScannerViewModel(application: Application) : AndroidViewModel(application)
         }
     }
 
-    fun changeQuantity(collectionKey: String, delta: Int) {
+    fun saveQuantity(collectionKey: String, quantity: Int) {
+        if (quantity <= 0) return
         val before = mutableState.value.sessionCards.firstOrNull {
             it.collectionKey == collectionKey
         }
             ?: return
-        mutableState.update { current ->
-            val nextCards = current.sessionCards.mapNotNull { item ->
-                if (item.collectionKey != collectionKey) return@mapNotNull item
-                val next = item.quantity + delta
-                if (next <= 0) null else item.copy(quantity = next)
-            }
-            current.copy(
-                sessionCards = nextCards,
-                recentScanCards = current.recentScanCards.mapNotNull { item ->
-                    if (item.collectionKey != collectionKey) return@mapNotNull item
-                    val collectionItem = nextCards.firstOrNull {
-                        it.collectionKey == collectionKey
-                    }
-                    collectionItem?.copy()
+        if (before.quantity == quantity) return
+        viewModelScope.launch {
+            val saved = persistCard(before.copy(quantity = quantity))
+            showNotice(
+                if (saved) {
+                    "${before.card.name} 수량을 ${quantity}장으로 저장했습니다."
+                } else {
+                    "수량 저장에 실패했습니다. 다시 시도해 주세요."
                 },
-                favoriteCardIds = current.favoriteCardIds.intersect(
-                    nextCards.map { it.collectionKey }.toSet(),
-                ),
             )
         }
+    }
+
+    fun deleteCollectionCard(collectionKey: String) {
+        val item = mutableState.value.sessionCards.firstOrNull {
+            it.collectionKey == collectionKey
+        } ?: return
         viewModelScope.launch {
-            val after = mutableState.value.sessionCards.firstOrNull {
-                it.collectionKey == collectionKey
+            val session = activeSession() ?: return@launch
+            val deleted = item.cloudId?.let { cloudId ->
+                runSync { collectionRepository.delete(session, cloudId) }
+            } ?: true
+            if (deleted) {
+                mutableState.update { current ->
+                    current.copy(
+                        sessionCards = current.sessionCards.filterNot {
+                            it.collectionKey == collectionKey
+                        },
+                        recentScanCards = current.recentScanCards.filterNot {
+                            it.collectionKey == collectionKey
+                        },
+                        favoriteCardIds = current.favoriteCardIds - collectionKey,
+                    )
+                }
             }
-            persistChange(before, after)
+            showNotice(
+                if (deleted) {
+                    "${item.card.name} 카드를 컬렉션에서 삭제했습니다."
+                } else {
+                    "카드 삭제에 실패했습니다. 다시 시도해 주세요."
+                },
+            )
         }
     }
 
@@ -840,20 +872,6 @@ class ScannerViewModel(application: Application) : AndroidViewModel(application)
         return RecognitionOutcome.Match(card, candidates)
     }
 
-    private suspend fun persistChange(
-        before: SessionCard?,
-        after: SessionCard?,
-    ) {
-        val session = activeSession() ?: return
-        if (after == null) {
-            before?.cloudId?.let {
-                runSync { collectionRepository.delete(session, it) }
-            }
-        } else {
-            persistCard(after)
-        }
-    }
-
     private suspend fun persistCard(item: SessionCard): Boolean {
         val session = activeSession() ?: return false
         return runSync {
@@ -934,6 +952,15 @@ class ScannerViewModel(application: Application) : AndroidViewModel(application)
 
     private fun setAuthMessage(message: String) {
         mutableState.update { it.copy(authMessage = message) }
+    }
+
+    private fun showNotice(message: String) {
+        mutableState.update {
+            it.copy(
+                noticeMessage = message,
+                noticeId = it.noticeId + 1L,
+            )
+        }
     }
 
     private fun incrementCard(

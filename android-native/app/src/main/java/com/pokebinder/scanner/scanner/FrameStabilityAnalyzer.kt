@@ -6,6 +6,8 @@ import androidx.camera.core.ImageAnalysis
 import androidx.camera.core.ImageProxy
 import com.pokebinder.scanner.model.CardDetection
 import com.pokebinder.scanner.model.FrameProbe
+import com.pokebinder.scanner.model.ScanPoint
+import org.opencv.core.Point
 import java.io.ByteArrayOutputStream
 import java.nio.ByteOrder
 import kotlin.math.hypot
@@ -16,7 +18,7 @@ class FrameStabilityAnalyzer(
     private val detector: CardRegionDetector = CardRegionDetector(),
 ) : ImageAnalysis.Analyzer {
 
-    private var previousDetection: CardDetection? = null
+    private var previousRegion: CardRegionDetector.DetectedCardRegion? = null
     private var stableFrames = 0
     private var lastCaptureAt = 0L
     private var analysisLocked = false
@@ -25,19 +27,21 @@ class FrameStabilityAnalyzer(
         var rotatedBitmap: Bitmap? = null
         try {
             rotatedBitmap = image.toRotatedBitmap() ?: return
-            val region = detector.detect(rotatedBitmap)
-            if (region == null) {
-                previousDetection = null
+            val rawRegion = detector.detect(rotatedBitmap)
+            if (rawRegion == null) {
+                previousRegion = null
                 stableFrames = 0
                 onProbe(FrameProbe())
                 return
             }
 
+            val motion = cornerMotion(previousRegion?.detection, rawRegion.detection)
+            val region = smoothRegion(previousRegion, rawRegion, motion)
             val detection = region.detection
-            val motion = cornerMotion(previousDetection, detection)
-            previousDetection = detection
-            val wellLit = region.brightness in MIN_BRIGHTNESS..MAX_BRIGHTNESS
-            stableFrames = if (wellLit && motion < MAX_CORNER_MOTION) {
+            previousRegion = region
+            val acceptableFrame = region.brightness in MIN_BRIGHTNESS..MAX_BRIGHTNESS &&
+                detection.confidence >= MIN_DETECTION_CONFIDENCE
+            stableFrames = if (acceptableFrame && motion < MAX_CORNER_MOTION) {
                 stableFrames + 1
             } else {
                 0
@@ -58,19 +62,52 @@ class FrameStabilityAnalyzer(
                 now - lastCaptureAt >= CAPTURE_COOLDOWN_MS
             ) {
                 analysisLocked = true
-                val cardBitmap = detector.warp(rotatedBitmap, region)
-                val output = ByteArrayOutputStream()
-                cardBitmap.compress(Bitmap.CompressFormat.JPEG, 88, output)
-                cardBitmap.recycle()
-                lastCaptureAt = now
-                stableFrames = 0
-                onStableFrame(output.toByteArray())
-                analysisLocked = false
+                try {
+                    val cardBitmap = detector.warp(rotatedBitmap, region)
+                    val output = ByteArrayOutputStream()
+                    cardBitmap.compress(Bitmap.CompressFormat.JPEG, 88, output)
+                    cardBitmap.recycle()
+                    lastCaptureAt = now
+                    stableFrames = 0
+                    onStableFrame(output.toByteArray())
+                } finally {
+                    analysisLocked = false
+                }
             }
         } finally {
             rotatedBitmap?.recycle()
             image.close()
         }
+    }
+
+    private fun smoothRegion(
+        previous: CardRegionDetector.DetectedCardRegion?,
+        current: CardRegionDetector.DetectedCardRegion,
+        motion: Double,
+    ): CardRegionDetector.DetectedCardRegion {
+        if (previous == null || motion > SMOOTHING_RESET_MOTION) return current
+        val points = previous.sourceCorners.zip(current.sourceCorners).map { (before, after) ->
+            Point(
+                before.x * (1.0 - CURRENT_FRAME_WEIGHT) + after.x * CURRENT_FRAME_WEIGHT,
+                before.y * (1.0 - CURRENT_FRAME_WEIGHT) + after.y * CURRENT_FRAME_WEIGHT,
+            )
+        }
+        val detection = current.detection.copy(
+            corners = points.map { point ->
+                ScanPoint(
+                    x = (point.x / current.detection.frameWidth).toFloat().coerceIn(0f, 1f),
+                    y = (point.y / current.detection.frameHeight).toFloat().coerceIn(0f, 1f),
+                )
+            },
+            confidence = previous.detection.confidence * (1.0 - CURRENT_FRAME_WEIGHT) +
+                current.detection.confidence * CURRENT_FRAME_WEIGHT,
+        )
+        return current.copy(
+            detection = detection,
+            sourceCorners = points,
+            brightness = previous.brightness * (1.0 - CURRENT_FRAME_WEIGHT) +
+                current.brightness * CURRENT_FRAME_WEIGHT,
+        )
     }
 
     private fun cornerMotion(
@@ -142,8 +179,11 @@ class FrameStabilityAnalyzer(
     private companion object {
         const val MIN_BRIGHTNESS = 32.0
         const val MAX_BRIGHTNESS = 238.0
-        const val MAX_CORNER_MOTION = 0.035
-        const val REQUIRED_STABLE_FRAMES = 2
+        const val MIN_DETECTION_CONFIDENCE = 0.50
+        const val MAX_CORNER_MOTION = 0.028
+        const val SMOOTHING_RESET_MOTION = 0.09
+        const val CURRENT_FRAME_WEIGHT = 0.42
+        const val REQUIRED_STABLE_FRAMES = 3
         const val CAPTURE_COOLDOWN_MS = 1_700L
     }
 }
