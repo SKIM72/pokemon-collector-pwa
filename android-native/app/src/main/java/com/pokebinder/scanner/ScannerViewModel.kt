@@ -736,9 +736,12 @@ class ScannerViewModel(application: Application) : AndroidViewModel(application)
         refreshAll: Boolean,
     ) {
         val targets = cards.filter { item ->
+            val needsJapaneseMarket = item.card.language == CardLanguage.JAPANESE &&
+                item.card.priceSource != "yuyu-tei"
             item.card.source == "tcgdex" &&
                 (
                     refreshAll ||
+                        needsJapaneseMarket ||
                         item.card.marketPrice == null ||
                         item.card.priceSource == "estimated-rarity" ||
                         isScanFallbackImage(item.card.imageUrl)

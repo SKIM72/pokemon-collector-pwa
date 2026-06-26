@@ -16,10 +16,13 @@ class CardMetadataFallbackRepository(
     private val officialJapaneseCards = ConcurrentHashMap<String, List<OfficialJapaneseCard>>()
     private val officialJapaneseDetails = ConcurrentHashMap<String, String>()
     private val englishCards = ConcurrentHashMap<String, List<JSONObject>>()
+    private val yuyuTeiPriceRepository = YuyuTeiPriceRepository(client)
 
     fun enrich(card: RecognizedCard): RecognizedCard {
         val providerEnriched = when (card.language) {
-            CardLanguage.JAPANESE -> addOfficialJapaneseImage(card)
+            CardLanguage.JAPANESE -> yuyuTeiPriceRepository.enrich(
+                addOfficialJapaneseImage(card),
+            )
             CardLanguage.ENGLISH -> addPokemonTcgMetadata(card)
             CardLanguage.KOREAN -> card
         }

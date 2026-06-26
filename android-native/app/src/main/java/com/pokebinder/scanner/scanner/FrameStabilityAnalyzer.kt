@@ -179,10 +179,10 @@ class FrameStabilityAnalyzer(
     private companion object {
         const val MIN_BRIGHTNESS = 32.0
         const val MAX_BRIGHTNESS = 238.0
-        const val MIN_DETECTION_CONFIDENCE = 0.50
-        const val MAX_CORNER_MOTION = 0.028
+        const val MIN_DETECTION_CONFIDENCE = 0.56
+        const val MAX_CORNER_MOTION = 0.022
         const val SMOOTHING_RESET_MOTION = 0.09
-        const val CURRENT_FRAME_WEIGHT = 0.42
+        const val CURRENT_FRAME_WEIGHT = 0.36
         const val REQUIRED_STABLE_FRAMES = 3
         const val CAPTURE_COOLDOWN_MS = 1_700L
     }

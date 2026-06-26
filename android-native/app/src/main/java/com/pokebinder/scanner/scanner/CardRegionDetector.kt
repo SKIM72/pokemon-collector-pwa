@@ -43,22 +43,22 @@ class CardRegionDetector {
             }
 
             Imgproc.cvtColor(working, gray, Imgproc.COLOR_RGBA2GRAY)
-            Imgproc.GaussianBlur(gray, gray, Size(5.0, 5.0), 0.0)
-            Imgproc.Canny(gray, edges, 32.0, 112.0)
+            Imgproc.GaussianBlur(gray, gray, Size(3.0, 3.0), 0.0)
+            Imgproc.Canny(gray, edges, 28.0, 104.0)
             Imgproc.adaptiveThreshold(
                 gray,
                 threshold,
                 255.0,
                 Imgproc.ADAPTIVE_THRESH_GAUSSIAN_C,
                 Imgproc.THRESH_BINARY,
-                31,
-                7.0,
+                35,
+                8.0,
             )
             Imgproc.Canny(threshold, thresholdEdges, 24.0, 92.0)
             Core.bitwise_or(edges, thresholdEdges, edges)
             val kernel = Imgproc.getStructuringElement(
                 Imgproc.MORPH_RECT,
-                Size(9.0, 9.0),
+                Size(5.0, 5.0),
             )
             Imgproc.morphologyEx(
                 edges,
@@ -66,7 +66,7 @@ class CardRegionDetector {
                 Imgproc.MORPH_CLOSE,
                 kernel,
                 Point(-1.0, -1.0),
-                2,
+                1,
             )
             kernel.release()
 
@@ -120,7 +120,7 @@ class CardRegionDetector {
     ): Bitmap {
         val source = Mat()
         val output = Mat(CARD_OUTPUT_HEIGHT, CARD_OUTPUT_WIDTH, CvType.CV_8UC4)
-        val sourcePoints = MatOfPoint2f(*region.sourceCorners.toTypedArray())
+        val sourcePoints = MatOfPoint2f(*paddedCorners(bitmap, region.sourceCorners).toTypedArray())
         val targetPoints = MatOfPoint2f(
             Point(0.0, 0.0),
             Point(CARD_OUTPUT_WIDTH - 1.0, 0.0),
@@ -181,6 +181,7 @@ class CardRegionDetector {
                 if (areaRatio !in MIN_AREA_RATIO..MAX_AREA_RATIO) return null
 
                 val ordered = orderCorners(points.toList())
+                if (!isFullyInsideFrame(ordered, frameSize, areaRatio)) return null
                 val width = (
                     distance(ordered[0], ordered[1]) +
                         distance(ordered[3], ordered[2])
@@ -329,6 +330,49 @@ class CardRegionDetector {
     private fun distance(first: Point, second: Point): Double =
         hypot(first.x - second.x, first.y - second.y)
 
+    private fun isFullyInsideFrame(
+        points: List<Point>,
+        frameSize: Size,
+        areaRatio: Double,
+    ): Boolean {
+        val marginRatio = if (areaRatio < 0.12) SMALL_CARD_MARGIN_RATIO else FRAME_MARGIN_RATIO
+        val marginX = frameSize.width * marginRatio
+        val marginY = frameSize.height * marginRatio
+        if (points.any {
+                it.x <= marginX ||
+                    it.y <= marginY ||
+                    it.x >= frameSize.width - marginX ||
+                    it.y >= frameSize.height - marginY
+            }
+        ) {
+            return false
+        }
+
+        val minX = points.minOf { it.x }
+        val maxX = points.maxOf { it.x }
+        val minY = points.minOf { it.y }
+        val maxY = points.maxOf { it.y }
+        val boxWidthRatio = (maxX - minX) / frameSize.width
+        val boxHeightRatio = (maxY - minY) / frameSize.height
+        return boxWidthRatio <= MAX_BOX_RATIO && boxHeightRatio <= MAX_BOX_RATIO
+    }
+
+    private fun paddedCorners(
+        bitmap: Bitmap,
+        corners: List<Point>,
+    ): List<Point> {
+        val centerX = corners.sumOf { it.x } / corners.size
+        val centerY = corners.sumOf { it.y } / corners.size
+        return corners.map { point ->
+            Point(
+                (centerX + (point.x - centerX) * WARP_PADDING_SCALE)
+                    .coerceIn(0.0, (bitmap.width - 1).toDouble()),
+                (centerY + (point.y - centerY) * WARP_PADDING_SCALE)
+                    .coerceIn(0.0, (bitmap.height - 1).toDouble()),
+            )
+        }
+    }
+
     private fun detectedRegion(
         bitmap: Bitmap,
         scaledPoints: List<Point>,
@@ -370,11 +414,11 @@ class CardRegionDetector {
 
     private companion object {
         const val CARD_ASPECT = 88.0 / 63.0
-        const val ASPECT_TOLERANCE = 0.32
-        const val MIN_ASPECT = 1.10
-        const val MAX_ASPECT = 1.76
-        const val MIN_AREA_RATIO = 0.035
-        const val MAX_AREA_RATIO = 0.88
+        const val ASPECT_TOLERANCE = 0.36
+        const val MIN_ASPECT = 1.12
+        const val MAX_ASPECT = 1.72
+        const val MIN_AREA_RATIO = 0.018
+        const val MAX_AREA_RATIO = 0.72
         const val MIN_RECTANGULARITY = 0.58
         const val MIN_ROTATED_RECT_RECTANGULARITY = 0.72
         const val MAX_CORNER_COSINE = 0.55
@@ -383,6 +427,10 @@ class CardRegionDetector {
         const val MAX_ANALYSIS_EDGE = 720.0
         const val CARD_OUTPUT_WIDTH = 630
         const val CARD_OUTPUT_HEIGHT = 880
+        const val FRAME_MARGIN_RATIO = 0.018
+        const val SMALL_CARD_MARGIN_RATIO = 0.008
+        const val MAX_BOX_RATIO = 0.92
+        const val WARP_PADDING_SCALE = 1.035
         const val EDGE_SUPPORT_WIDTH = 7
         const val EXPECTED_EDGE_SUPPORT = 0.18
         const val CORNER_MARGIN = 9.0
