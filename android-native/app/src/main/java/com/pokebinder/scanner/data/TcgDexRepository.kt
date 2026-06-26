@@ -102,8 +102,10 @@ class TcgDexRepository(
         val summaries = coroutineScope {
             buildList {
                 hints.names.take(3).forEach { name ->
-                    add(async { searchFiltered(name, hints.localId, language, 40) })
-                    add(async { searchFiltered(name, null, language, 40) })
+                    QueryAliases.expand(name, language).take(6).forEach { variant ->
+                        add(async { searchFiltered(variant, hints.localId, language, 32) })
+                        add(async { searchFiltered(variant, null, language, 32) })
+                    }
                 }
                 if (hints.localId != null) {
                     add(async { searchFiltered(null, hints.localId, language, 60) })
@@ -117,14 +119,16 @@ class TcgDexRepository(
                 val normalizedHint = normalized(hint)
                 when {
                     normalizedHint == normalizedName -> 0.58
+                    stripMegaPrefix(normalizedHint) == normalizedName -> 0.54
                     normalizedHint.contains(normalizedName) ||
-                        normalizedName.contains(normalizedHint) -> 0.42
+                        normalizedName.contains(normalizedHint) -> 0.46
                     else -> sharedPrefixScore(normalizedHint, normalizedName) * 0.28
                 }
             } ?: 0.0
             val numberScore = when {
                 hints.localId == null -> 0.0
-                normalizedNumber(card.number) == normalizedNumber(hints.localId) -> 0.38
+                normalizedNumber(card.number) == normalizedNumber(hints.localId) ->
+                    if (hints.names.isEmpty()) 0.55 else 0.38
                 else -> 0.0
             }
             card.copy(confidence = (bestNameScore + numberScore).coerceIn(0.0, 0.96))
@@ -288,6 +292,11 @@ class TcgDexRepository(
         fun normalizedNumber(value: String): String =
             value.trim().trimStart('0').ifBlank { "0" }
 
+        fun stripMegaPrefix(value: String): String =
+            value.removePrefix("メガ")
+                .removePrefix("메가")
+                .removePrefix("mega")
+
         fun sharedPrefixScore(first: String, second: String): Double {
             val maximum = minOf(first.length, second.length)
             if (maximum == 0) return 0.0
@@ -342,6 +351,7 @@ internal object QueryAliases {
         listOf("다크라이", "ダークライ", "Darkrai"),
         listOf("세레비", "セレビィ", "Celebi"),
         listOf("지라치", "ジラーチ", "Jirachi"),
+        listOf("개굴닌자", "ゲッコウガ", "Greninja"),
         listOf("테라파고스", "テラパゴス", "Terapagos"),
         listOf("오거폰", "オーガポン", "Ogerpon"),
         listOf("마스카나", "マスカーニャ", "Meowscarada"),
@@ -363,6 +373,8 @@ internal object QueryAliases {
         val suffix = suffixes.firstOrNull {
             trimmed.replace(" ", "").endsWith(it, ignoreCase = true)
         }.orEmpty()
+        val hasMegaPrefix = listOf("메가", "メガ", "mega")
+            .any { normalizedQuery.contains(normalize(it)) }
         val preferredIndex = when (language) {
             CardLanguage.KOREAN -> 0
             CardLanguage.JAPANESE -> 1
@@ -370,10 +382,15 @@ internal object QueryAliases {
         }
         return buildList {
             add(group[preferredIndex] + suffix)
+            if (hasMegaPrefix) add(megaName(group[preferredIndex]) + suffix)
             add(trimmed)
             group.forEach { name ->
                 add(name + suffix)
                 if (suffix.isNotBlank()) add("$name $suffix")
+                if (hasMegaPrefix) {
+                    add(megaName(name) + suffix)
+                    if (suffix.isNotBlank()) add("${megaName(name)} $suffix")
+                }
             }
         }.filter { it.isNotBlank() }.distinct()
     }
@@ -381,4 +398,10 @@ internal object QueryAliases {
     private fun normalize(value: String): String = value
         .lowercase(Locale.ROOT)
         .replace(" ", "")
+
+    private fun megaName(value: String): String = when {
+        value.any { it in '\u3040'..'\u30ff' || it in '\u4e00'..'\u9faf' } -> "メガ$value"
+        value.any { it in '\uac00'..'\ud7a3' } -> "메가$value"
+        else -> "Mega $value"
+    }
 }

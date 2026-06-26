@@ -23,8 +23,8 @@ android {
         applicationId = "com.pokebinder.scanner"
         minSdk = 26
         targetSdk = 33
-        versionCode = 12
-        versionName = "0.12.0"
+        versionCode = 13
+        versionName = "0.13.0"
         ndk {
             abiFilters += setOf("arm64-v8a")
         }

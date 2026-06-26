@@ -10,6 +10,7 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -107,13 +108,20 @@ fun ScannerScreen(
             focusPoint = null
         }
     }
+    val showCapturedScan = state.capturedScanImageUrl != null &&
+        (state.scanAwaitingConfirmation || state.scanAdded)
 
     Box(
         modifier = Modifier
             .fillMaxSize()
             .background(MaterialTheme.colorScheme.background),
     ) {
-        if (hasCameraPermission) {
+        if (showCapturedScan) {
+            CapturedScanPreview(
+                imageUrl = state.capturedScanImageUrl.orEmpty(),
+                modifier = Modifier.fillMaxSize(),
+            )
+        } else if (hasCameraPermission) {
             CameraPreview(
                 onProbe = onFrameProbe,
                 onStableFrame = onStableFrame,
@@ -143,16 +151,18 @@ fun ScannerScreen(
             onClose = onClose,
         )
 
-        DetectedCardOverlay(
-            detection = state.probe.detection,
-            phase = state.phase,
-            modifier = Modifier.fillMaxSize(),
-        )
-        focusPoint?.let { point ->
-            FocusIndicator(
-                point = point,
+        if (!showCapturedScan) {
+            DetectedCardOverlay(
+                detection = state.probe.detection,
+                phase = state.phase,
                 modifier = Modifier.fillMaxSize(),
             )
+            focusPoint?.let { point ->
+                FocusIndicator(
+                    point = point,
+                    modifier = Modifier.fillMaxSize(),
+                )
+            }
         }
 
         state.currentMatch?.marketPrice?.let {
@@ -174,6 +184,48 @@ fun ScannerScreen(
             onClearSession = onClearSession,
             modifier = Modifier.align(Alignment.BottomCenter),
         )
+    }
+}
+
+@Composable
+private fun CapturedScanPreview(
+    imageUrl: String,
+    modifier: Modifier = Modifier,
+) {
+    Box(
+        contentAlignment = Alignment.Center,
+        modifier = modifier
+            .background(Color.Black)
+            .padding(horizontal = 34.dp, vertical = 148.dp),
+    ) {
+        Surface(
+            color = Color(0xFF11161C),
+            shape = RoundedCornerShape(18.dp),
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                modifier = Modifier.padding(14.dp),
+            ) {
+                Text(
+                    text = "스캔 완료",
+                    color = MaterialTheme.colorScheme.primary,
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Spacer(modifier = Modifier.height(10.dp))
+                SubcomposeAsyncImage(
+                    model = imageUrl,
+                    contentDescription = "스캔 완료 이미지",
+                    contentScale = ContentScale.Fit,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .aspectRatio(63f / 88f)
+                        .background(Color(0xFF252D37), RoundedCornerShape(12.dp)),
+                )
+            }
+        }
     }
 }
 

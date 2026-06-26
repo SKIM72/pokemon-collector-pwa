@@ -159,6 +159,7 @@ data class ScannerUiState(
     val scanAwaitingConfirmation: Boolean = false,
     val scanAdded: Boolean = false,
     val scanSaving: Boolean = false,
+    val capturedScanImageUrl: String? = null,
     val scanDebugEnabled: Boolean = false,
     val lastScanDebug: ScanDebugSnapshot? = null,
     val displayCurrency: String = "JPY",

@@ -25,6 +25,7 @@ class CardScanImageRepository(
 ) {
     private val imageDirectory = File(context.filesDir, "card-scans").apply { mkdirs() }
     private val debugDirectory = File(context.cacheDir, "scan-debug").apply { mkdirs() }
+    private val previewDirectory = File(context.cacheDir, "scan-preview").apply { mkdirs() }
 
     fun saveLocal(
         card: RecognizedCard,
@@ -40,6 +41,12 @@ class CardScanImageRepository(
 
     fun saveDebugCrop(jpegBytes: ByteArray): String {
         val file = File(debugDirectory, "last-stable-card.jpg")
+        file.writeBytes(jpegBytes)
+        return Uri.fromFile(file).toString()
+    }
+
+    fun savePreviewCrop(jpegBytes: ByteArray): String {
+        val file = File(previewDirectory, "latest-captured-card.jpg")
         file.writeBytes(jpegBytes)
         return Uri.fromFile(file).toString()
     }

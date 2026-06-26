@@ -300,6 +300,7 @@ class ScannerViewModel(application: Application) : AndroidViewModel(application)
                 scanAwaitingConfirmation = false,
                 scanAdded = false,
                 scanSaving = false,
+                capturedScanImageUrl = null,
                 statusMessage = "화면 안에 카드를 보여 주세요",
             )
         }
@@ -356,6 +357,9 @@ class ScannerViewModel(application: Application) : AndroidViewModel(application)
         }
 
         viewModelScope.launch {
+            val previewCropUrl = runCatching {
+                scanImageRepository.savePreviewCrop(jpegBytes)
+            }.getOrNull()
             val debugCropUrl = if (mutableState.value.scanDebugEnabled) {
                 runCatching { scanImageRepository.saveDebugCrop(jpegBytes) }.getOrNull()
             } else {
@@ -394,6 +398,7 @@ class ScannerViewModel(application: Application) : AndroidViewModel(application)
                             scanAwaitingConfirmation = true,
                             scanAdded = false,
                             scanSaving = false,
+                            capturedScanImageUrl = previewCropUrl,
                             statusMessage = "후보를 확인한 뒤 컬렉션에 추가해 주세요",
                             isEndpointConfigured = true,
                             lastScanDebug = it.scanDebugSnapshotForResult(
@@ -532,6 +537,7 @@ class ScannerViewModel(application: Application) : AndroidViewModel(application)
                 scanAwaitingConfirmation = false,
                 scanAdded = false,
                 scanSaving = false,
+                capturedScanImageUrl = null,
                 statusMessage = "다음 카드를 화면 안에 보여 주세요",
             )
         }
@@ -631,6 +637,7 @@ class ScannerViewModel(application: Application) : AndroidViewModel(application)
                 scanAwaitingConfirmation = false,
                 scanAdded = false,
                 scanSaving = false,
+                capturedScanImageUrl = null,
                 statusMessage = "새 스캔을 시작합니다",
             )
         }

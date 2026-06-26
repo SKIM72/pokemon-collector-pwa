@@ -35,15 +35,25 @@ class CardTextRecognizer : AutoCloseable {
                     )
                 }
 
-            val names = lines.asSequence()
+            val strictNames = lines.asSequence()
                 .filter { it.top < bitmap.height * NAME_REGION_RATIO }
                 .filter { isLikelyName(it.text, language) }
                 .sortedWith(compareBy<TextLine> { it.top }.thenByDescending { it.height })
                 .map { cleanName(it.text) }
                 .filter { it.length >= 2 }
                 .distinct()
-                .take(MAX_NAME_CANDIDATES)
                 .toList()
+            val looseNames = lines.asSequence()
+                .filter { it.top < bitmap.height * LOOSE_NAME_REGION_RATIO }
+                .flatMap { line -> nameFragments(line.text).asSequence() }
+                .map(::cleanName)
+                .filter { it.length >= 2 }
+                .filter { isLikelyName(it, language) }
+                .distinct()
+                .toList()
+            val names = (strictNames + looseNames)
+                .distinct()
+                .take(MAX_NAME_CANDIDATES)
 
             CardTextHints(
                 names = names,
@@ -98,10 +108,18 @@ class CardTextRecognizer : AutoCloseable {
     }
 
     private fun cleanName(value: String): String = value
+        .replace(CARD_NUMBER, "")
         .replace(HP_VALUE, "")
+        .replace(RARITY_LABEL, "")
         .replace(LEADING_LABEL, "")
+        .replace(TRAILING_HP_NUMBER, "")
         .replace(Regex("""\s+"""), " ")
         .trim(' ', '·', '.', '-', '_', ':')
+
+    private fun nameFragments(value: String): List<String> =
+        value.split('|', '｜', '／', '/', '(', ')', '（', '）')
+            .map(::cleanName)
+            .filter(String::isNotBlank)
 
     private data class TextLine(
         val text: String,
@@ -110,10 +128,13 @@ class CardTextRecognizer : AutoCloseable {
     )
 
     private companion object {
-        const val NAME_REGION_RATIO = 0.42f
-        const val MAX_NAME_CANDIDATES = 4
+        const val NAME_REGION_RATIO = 0.48f
+        const val LOOSE_NAME_REGION_RATIO = 0.62f
+        const val MAX_NAME_CANDIDATES = 7
         val CARD_NUMBER = Regex("""(?<!\d)(\d{1,3})\s*[/／]\s*\d{2,3}""")
         val HP_VALUE = Regex("""(?i)HP\s*\d{1,3}""")
+        val TRAILING_HP_NUMBER = Regex("""(?<=\D)\s*\d{2,3}\s*$""")
+        val RARITY_LABEL = Regex("""(?i)^(SAR|SR|AR|UR|RRR|RR|CHR|CSR|ACE\s*SPEC)\s+""")
         val LEADING_LABEL = Regex("""(?i)^(BASIC|STAGE\s*[12]|たね|1進化|2進化)\s*""")
         val IGNORED_NAME_PARTS = listOf(
             "TRAINER",
