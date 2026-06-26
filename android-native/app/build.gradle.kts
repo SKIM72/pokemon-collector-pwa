@@ -23,8 +23,8 @@ android {
         applicationId = "com.pokebinder.scanner"
         minSdk = 26
         targetSdk = 33
-        versionCode = 13
-        versionName = "0.13.0"
+        versionCode = 14
+        versionName = "0.14.0"
         ndk {
             abiFilters += setOf("arm64-v8a")
         }
@@ -44,6 +44,13 @@ android {
             "PASSWORD_RESET_REDIRECT_URL",
             "\"${localString("PASSWORD_RESET_REDIRECT_URL").ifBlank {
                 "https://skim72.github.io/pokemon-collector-pwa/"
+            }}\"",
+        )
+        buildConfigField(
+            "String",
+            "UPDATE_RELEASE_API",
+            "\"${localString("UPDATE_RELEASE_API").ifBlank {
+                "https://api.github.com/repos/SKIM72/pokemon-collector-pwa/releases/latest"
             }}\"",
         )
     }

@@ -146,6 +146,8 @@ fun PokeBinderApp(
     onDisplayCurrencyChanged: (String) -> Unit,
     onScanDebugToggle: (Boolean) -> Unit,
     onScanDebugClear: () -> Unit,
+    onCheckForUpdate: () -> Unit,
+    onInstallUpdate: () -> Unit,
     onRefreshCollection: () -> Unit,
     onProfileUpdate: (String) -> Unit,
     onPasswordUpdate: (String, String) -> Unit,
@@ -274,6 +276,8 @@ fun PokeBinderApp(
                 onDisplayCurrencyChanged = onDisplayCurrencyChanged,
                 onScanDebugToggle = onScanDebugToggle,
                 onScanDebugClear = onScanDebugClear,
+                onCheckForUpdate = onCheckForUpdate,
+                onInstallUpdate = onInstallUpdate,
                 onRefreshCollection = onRefreshCollection,
                 onProfileUpdate = onProfileUpdate,
                 onPasswordUpdate = onPasswordUpdate,
@@ -1414,6 +1418,8 @@ private fun SettingsScreen(
     onDisplayCurrencyChanged: (String) -> Unit,
     onScanDebugToggle: (Boolean) -> Unit,
     onScanDebugClear: () -> Unit,
+    onCheckForUpdate: () -> Unit,
+    onInstallUpdate: () -> Unit,
     onRefreshCollection: () -> Unit,
     onProfileUpdate: (String) -> Unit,
     onPasswordUpdate: (String, String) -> Unit,
@@ -1691,6 +1697,16 @@ private fun SettingsScreen(
                 SettingsRow(label = "버전", value = BuildConfig.VERSION_NAME)
                 Divider(color = MaterialTheme.colorScheme.surfaceVariant)
                 SettingsRow(
+                    label = "최신 버전",
+                    value = state.updateInfo?.latestVersion?.ifBlank { "-" } ?: "-",
+                    valueColor = if (state.updateInfo?.isUpdateAvailable == true) {
+                        MaterialTheme.colorScheme.primary
+                    } else {
+                        MaterialTheme.colorScheme.onSurfaceVariant
+                    },
+                )
+                Divider(color = MaterialTheme.colorScheme.surfaceVariant)
+                SettingsRow(
                     label = "이미지 매칭",
                     value = if (state.isEndpointConfigured) "연결됨" else "설정 필요",
                     valueColor = if (state.isEndpointConfigured) {
@@ -1699,6 +1715,56 @@ private fun SettingsScreen(
                         MaterialTheme.colorScheme.error
                     },
                 )
+                if (state.updateMessage.isNotBlank()) {
+                    Spacer(modifier = Modifier.height(10.dp))
+                    Text(
+                        text = state.updateMessage,
+                        color = if (state.updateMessage.contains("실패") ||
+                            state.updateMessage.contains("없습니다")
+                        ) {
+                            MaterialTheme.colorScheme.error
+                        } else {
+                            MaterialTheme.colorScheme.onSurfaceVariant
+                        },
+                        fontSize = 12.sp,
+                    )
+                }
+                Spacer(modifier = Modifier.height(12.dp))
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Button(
+                        onClick = onCheckForUpdate,
+                        enabled = !state.updateBusy,
+                        modifier = Modifier.weight(1f),
+                    ) {
+                        if (state.updateBusy) {
+                            CircularProgressIndicator(
+                                color = MaterialTheme.colorScheme.onPrimary,
+                                strokeWidth = 2.dp,
+                                modifier = Modifier.size(18.dp),
+                            )
+                        } else {
+                            Icon(
+                                imageVector = Icons.Rounded.Refresh,
+                                contentDescription = null,
+                                modifier = Modifier.size(18.dp),
+                            )
+                        }
+                        Spacer(modifier = Modifier.width(7.dp))
+                        Text("업데이트 확인")
+                    }
+                    if (state.updateInfo?.isUpdateAvailable == true) {
+                        OutlinedButton(
+                            onClick = onInstallUpdate,
+                            enabled = !state.updateBusy,
+                            modifier = Modifier.weight(1f),
+                        ) {
+                            Text("다운로드")
+                        }
+                    }
+                }
             }
         }
         if (state.authMessage.isNotBlank()) {

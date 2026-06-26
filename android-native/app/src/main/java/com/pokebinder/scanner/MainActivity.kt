@@ -57,6 +57,8 @@ class MainActivity : ComponentActivity() {
                     onDisplayCurrencyChanged = scannerViewModel::setDisplayCurrency,
                     onScanDebugToggle = scannerViewModel::setScanDebugEnabled,
                     onScanDebugClear = scannerViewModel::clearScanDebug,
+                    onCheckForUpdate = scannerViewModel::checkForAppUpdate,
+                    onInstallUpdate = scannerViewModel::downloadAndInstallAppUpdate,
                     onRefreshCollection = scannerViewModel::refreshCollection,
                     onProfileUpdate = scannerViewModel::updateProfile,
                     onPasswordUpdate = scannerViewModel::updatePassword,

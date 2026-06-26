@@ -47,6 +47,17 @@ data class AuthUser(
     val username: String = "",
 )
 
+data class AppUpdateInfo(
+    val currentVersion: String = "",
+    val latestVersion: String = "",
+    val tagName: String = "",
+    val releaseUrl: String = "",
+    val apkUrl: String = "",
+    val apkName: String = "",
+    val apkSizeBytes: Long = 0L,
+    val isUpdateAvailable: Boolean = false,
+)
+
 data class FrameProbe(
     val brightness: Double = 0.0,
     val motion: Double = 1.0,
@@ -166,6 +177,9 @@ data class ScannerUiState(
     val currencyRates: Map<String, Double> = DEFAULT_CURRENCY_RATES,
     val noticeMessage: String = "",
     val noticeId: Long = 0L,
+    val updateBusy: Boolean = false,
+    val updateMessage: String = "",
+    val updateInfo: AppUpdateInfo? = null,
 ) {
     val totalCards: Int
         get() = sessionCards.sumOf { it.quantity }

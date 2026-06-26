@@ -4,6 +4,7 @@ import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.pokebinder.scanner.data.AuthOutcome
+import com.pokebinder.scanner.data.AppUpdateRepository
 import com.pokebinder.scanner.data.CardRecognitionRepository
 import com.pokebinder.scanner.data.CardScanImageRepository
 import com.pokebinder.scanner.data.EdgeFunctionCardRecognitionRepository
@@ -50,6 +51,7 @@ class ScannerViewModel(application: Application) : AndroidViewModel(application)
     private val scanImageRepository = CardScanImageRepository(application)
     private val cardSearchRepository = TcgDexRepository()
     private val exchangeRateRepository = ExchangeRateRepository()
+    private val appUpdateRepository = AppUpdateRepository(application)
 
     private val mutableState = MutableStateFlow(
         ScannerUiState(
@@ -240,6 +242,66 @@ class ScannerViewModel(application: Application) : AndroidViewModel(application)
         scanImageRepository.clearDebugCrops()
         mutableState.update { it.copy(lastScanDebug = null) }
         showNotice("스캔 디버그 기록을 지웠습니다.")
+    }
+
+    fun checkForAppUpdate() {
+        if (mutableState.value.updateBusy) return
+        viewModelScope.launch {
+            mutableState.update {
+                it.copy(updateBusy = true, updateMessage = "업데이트 확인 중")
+            }
+            runCatching {
+                appUpdateRepository.checkLatest()
+            }.onSuccess { update ->
+                mutableState.update {
+                    it.copy(
+                        updateBusy = false,
+                        updateInfo = update,
+                        updateMessage = if (update.isUpdateAvailable) {
+                            "새 버전 ${update.latestVersion}을 설치할 수 있습니다."
+                        } else {
+                            "현재 최신 버전입니다."
+                        },
+                    )
+                }
+            }.onFailure { error ->
+                mutableState.update {
+                    it.copy(
+                        updateBusy = false,
+                        updateMessage = error.message ?: "업데이트 확인에 실패했습니다.",
+                    )
+                }
+            }
+        }
+    }
+
+    fun downloadAndInstallAppUpdate() {
+        val update = mutableState.value.updateInfo
+        if (update?.isUpdateAvailable != true || mutableState.value.updateBusy) return
+        viewModelScope.launch {
+            mutableState.update {
+                it.copy(updateBusy = true, updateMessage = "APK 다운로드 중")
+            }
+            runCatching {
+                val apkFile = appUpdateRepository.downloadApk(update)
+                appUpdateRepository.openInstaller(apkFile)
+            }.onSuccess {
+                mutableState.update {
+                    it.copy(
+                        updateBusy = false,
+                        updateMessage = "설치 화면을 열었습니다. Android 안내에 따라 설치해 주세요.",
+                    )
+                }
+            }.onFailure { error ->
+                mutableState.update {
+                    it.copy(
+                        updateBusy = false,
+                        updateMessage = error.message
+                            ?: "업데이트 설치 화면을 열 수 없습니다. 알 수 없는 앱 설치 권한을 확인해 주세요.",
+                    )
+                }
+            }
+        }
     }
 
     fun addSearchCard(card: RecognizedCard) {
