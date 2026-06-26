@@ -24,6 +24,7 @@ class CardScanImageRepository(
         .build(),
 ) {
     private val imageDirectory = File(context.filesDir, "card-scans").apply { mkdirs() }
+    private val debugDirectory = File(context.cacheDir, "scan-debug").apply { mkdirs() }
 
     fun saveLocal(
         card: RecognizedCard,
@@ -36,6 +37,18 @@ class CardScanImageRepository(
 
     fun localImageUrl(card: RecognizedCard): String? =
         localFile(card).takeIf(File::exists)?.let(Uri::fromFile)?.toString()
+
+    fun saveDebugCrop(jpegBytes: ByteArray): String {
+        val file = File(debugDirectory, "last-stable-card.jpg")
+        file.writeBytes(jpegBytes)
+        return Uri.fromFile(file).toString()
+    }
+
+    fun clearDebugCrops() {
+        debugDirectory.listFiles()?.forEach { file ->
+            if (file.isFile) file.delete()
+        }
+    }
 
     suspend fun upload(
         session: SupabaseSession,

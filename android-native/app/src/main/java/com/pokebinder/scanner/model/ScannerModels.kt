@@ -66,6 +66,36 @@ data class CardDetection(
     val frameHeight: Int,
 )
 
+data class ScanDebugCandidate(
+    val name: String,
+    val setName: String,
+    val number: String,
+    val confidence: Double,
+    val source: String,
+    val priceSource: String,
+    val priceText: String,
+)
+
+data class ScanDebugSnapshot(
+    val capturedAt: String = "",
+    val language: CardLanguage = CardLanguage.JAPANESE,
+    val phase: ScanPhase = ScanPhase.WAITING,
+    val statusMessage: String = "",
+    val brightness: Double = 0.0,
+    val motion: Double = 0.0,
+    val stableFrames: Int = 0,
+    val detectionConfidence: Double = 0.0,
+    val cornerSummary: String = "",
+    val cropImageUrl: String? = null,
+    val recognizedCardName: String = "",
+    val recognizedSetName: String = "",
+    val recognizedNumber: String = "",
+    val recognizedConfidence: Double = 0.0,
+    val recognitionPath: String = "",
+    val errorMessage: String = "",
+    val candidates: List<ScanDebugCandidate> = emptyList(),
+)
+
 data class CardTextHints(
     val names: List<String>,
     val localId: String?,
@@ -129,6 +159,8 @@ data class ScannerUiState(
     val scanAwaitingConfirmation: Boolean = false,
     val scanAdded: Boolean = false,
     val scanSaving: Boolean = false,
+    val scanDebugEnabled: Boolean = false,
+    val lastScanDebug: ScanDebugSnapshot? = null,
     val displayCurrency: String = "JPY",
     val currencyRates: Map<String, Double> = DEFAULT_CURRENCY_RATES,
     val noticeMessage: String = "",

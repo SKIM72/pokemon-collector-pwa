@@ -55,6 +55,8 @@ class MainActivity : ComponentActivity() {
                     onCollectionSortDirectionToggle =
                     scannerViewModel::toggleCollectionSortDirection,
                     onDisplayCurrencyChanged = scannerViewModel::setDisplayCurrency,
+                    onScanDebugToggle = scannerViewModel::setScanDebugEnabled,
+                    onScanDebugClear = scannerViewModel::clearScanDebug,
                     onRefreshCollection = scannerViewModel::refreshCollection,
                     onProfileUpdate = scannerViewModel::updateProfile,
                     onPasswordUpdate = scannerViewModel::updatePassword,

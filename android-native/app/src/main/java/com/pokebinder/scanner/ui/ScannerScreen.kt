@@ -61,10 +61,13 @@ import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import com.pokebinder.scanner.model.CardDetection
 import com.pokebinder.scanner.model.CardLanguage
+import com.pokebinder.scanner.model.FrameProbe
 import com.pokebinder.scanner.model.RecognizedCard
+import com.pokebinder.scanner.model.ScanDebugSnapshot
 import com.pokebinder.scanner.model.ScanPhase
 import com.pokebinder.scanner.model.ScannerUiState
 import com.pokebinder.scanner.model.SessionCard
+import coil.compose.SubcomposeAsyncImage
 import kotlinx.coroutines.delay
 import java.text.NumberFormat
 import java.util.Locale
@@ -73,7 +76,7 @@ import java.util.Locale
 fun ScannerScreen(
     state: ScannerUiState,
     onLanguageSelected: (CardLanguage) -> Unit,
-    onFrameProbe: (com.pokebinder.scanner.model.FrameProbe) -> Unit,
+    onFrameProbe: (FrameProbe) -> Unit,
     onStableFrame: (ByteArray) -> Unit,
     onCandidateSelected: (RecognizedCard) -> Unit,
     onConfirmScan: () -> Unit,
@@ -602,7 +605,128 @@ private fun ScannerBottomPanel(
                     }
                 }
             }
+
+            if (state.scanDebugEnabled) {
+                Spacer(modifier = Modifier.height(12.dp))
+                ScanDebugPanel(
+                    debug = state.lastScanDebug,
+                    probe = state.probe,
+                )
+            }
         }
+    }
+}
+
+@Composable
+private fun ScanDebugPanel(
+    debug: ScanDebugSnapshot?,
+    probe: FrameProbe,
+) {
+    Surface(
+        color = Color(0xFF121820),
+        shape = RoundedCornerShape(14.dp),
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Column(modifier = Modifier.padding(12.dp)) {
+            Text(
+                text = "스캔 디버그",
+                color = MaterialTheme.colorScheme.primary,
+                fontSize = 12.sp,
+                fontWeight = FontWeight.Bold,
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+            if (debug == null) {
+                Text(
+                    text = "카드를 비추면 검출값이 표시됩니다.",
+                    color = Color(0xFFADB6C2),
+                    fontSize = 12.sp,
+                )
+                return@Column
+            }
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                if (debug.cropImageUrl != null) {
+                    SubcomposeAsyncImage(
+                        model = debug.cropImageUrl,
+                        contentDescription = "마지막 스캔 크롭",
+                        contentScale = ContentScale.Crop,
+                        modifier = Modifier
+                            .size(width = 50.dp, height = 70.dp)
+                            .background(Color(0xFF252D37), RoundedCornerShape(7.dp)),
+                    )
+                    Spacer(modifier = Modifier.width(10.dp))
+                }
+                Column(modifier = Modifier.weight(1f)) {
+                    DebugLine("경로", debug.recognitionPath.ifBlank { "대기" })
+                    DebugLine(
+                        "검출",
+                        "${(debug.detectionConfidence * 100).toInt()}% · 안정 ${debug.stableFrames}",
+                    )
+                    DebugLine(
+                        "프레임",
+                        "밝기 ${debug.brightness.toInt()} · 흔들림 ${
+                            String.format(Locale.US, "%.3f", debug.motion)
+                        }",
+                    )
+                    if (debug.errorMessage.isNotBlank()) {
+                        DebugLine("오류", debug.errorMessage)
+                    } else if (debug.recognizedCardName.isNotBlank()) {
+                        DebugLine(
+                            "선택",
+                            "${debug.recognizedCardName} #${debug.recognizedNumber} ${
+                                (debug.recognizedConfidence * 100).toInt()
+                            }%",
+                        )
+                    }
+                }
+            }
+            if (debug.cornerSummary.isNotBlank()) {
+                Spacer(modifier = Modifier.height(6.dp))
+                DebugLine("모서리", debug.cornerSummary)
+            }
+            val candidates = debug.candidates.take(3)
+            if (candidates.isNotEmpty()) {
+                Spacer(modifier = Modifier.height(8.dp))
+                candidates.forEach { candidate ->
+                    Text(
+                        text = "${candidate.name} #${candidate.number} · ${
+                            (candidate.confidence * 100).toInt()
+                        }% · ${candidate.priceSource}",
+                        color = Color(0xFFCAD2DC),
+                        fontSize = 11.sp,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+            } else if (probe.detection != null) {
+                Spacer(modifier = Modifier.height(8.dp))
+                Text(
+                    text = "후보 대기 중",
+                    color = Color(0xFF85909D),
+                    fontSize = 11.sp,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun DebugLine(
+    label: String,
+    value: String,
+) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Text(
+            text = "$label ",
+            color = Color(0xFF85909D),
+            fontSize = 11.sp,
+        )
+        Text(
+            text = value,
+            color = Color(0xFFCAD2DC),
+            fontSize = 11.sp,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
     }
 }
 

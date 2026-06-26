@@ -13,11 +13,14 @@ import com.pokebinder.scanner.data.SupabaseCollectionRepository
 import com.pokebinder.scanner.data.SupabaseSession
 import com.pokebinder.scanner.data.TcgDexRepository
 import com.pokebinder.scanner.model.AuthStatus
+import com.pokebinder.scanner.model.CardDetection
 import com.pokebinder.scanner.model.CardLanguage
 import com.pokebinder.scanner.model.CollectionSortField
 import com.pokebinder.scanner.model.FrameProbe
 import com.pokebinder.scanner.model.RecognitionOutcome
 import com.pokebinder.scanner.model.RecognizedCard
+import com.pokebinder.scanner.model.ScanDebugCandidate
+import com.pokebinder.scanner.model.ScanDebugSnapshot
 import com.pokebinder.scanner.model.ScanPhase
 import com.pokebinder.scanner.model.SearchSortField
 import com.pokebinder.scanner.model.ScannerUiState
@@ -34,6 +37,8 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import java.time.Instant
+import java.util.Locale
+import kotlin.math.roundToInt
 
 class ScannerViewModel(application: Application) : AndroidViewModel(application) {
     private val imageEmbedder = CardImageEmbedder(application)
@@ -221,6 +226,22 @@ class ScannerViewModel(application: Application) : AndroidViewModel(application)
         }
     }
 
+    fun setScanDebugEnabled(enabled: Boolean) {
+        mutableState.update {
+            it.copy(
+                scanDebugEnabled = enabled,
+                lastScanDebug = if (enabled) it.lastScanDebug else null,
+            )
+        }
+        showNotice(if (enabled) "스캔 디버그가 켜졌습니다." else "스캔 디버그가 꺼졌습니다.")
+    }
+
+    fun clearScanDebug() {
+        scanImageRepository.clearDebugCrops()
+        mutableState.update { it.copy(lastScanDebug = null) }
+        showNotice("스캔 디버그 기록을 지웠습니다.")
+    }
+
     fun addSearchCard(card: RecognizedCard) {
         viewModelScope.launch {
             mutableState.update {
@@ -306,7 +327,19 @@ class ScannerViewModel(application: Application) : AndroidViewModel(application)
                 probe.stableFrames > 0 -> "카드 영역 감지됨 · 잠시 고정해 주세요"
                 else -> "카드 모서리를 추적하고 있습니다"
             }
-            current.copy(probe = probe, phase = phase, statusMessage = message)
+            val updated = current.copy(probe = probe, phase = phase, statusMessage = message)
+            if (updated.scanDebugEnabled) {
+                updated.copy(
+                    lastScanDebug = buildProbeDebugSnapshot(
+                        language = updated.language,
+                        probe = probe,
+                        phase = phase,
+                        message = message,
+                    ),
+                )
+            } else {
+                updated
+            }
         }
     }
 
@@ -323,13 +356,28 @@ class ScannerViewModel(application: Application) : AndroidViewModel(application)
         }
 
         viewModelScope.launch {
+            val debugCropUrl = if (mutableState.value.scanDebugEnabled) {
+                runCatching { scanImageRepository.saveDebugCrop(jpegBytes) }.getOrNull()
+            } else {
+                null
+            }
             val primaryOutcome = recognitionRepository.recognize(jpegBytes, language)
+            var recognitionPath = "image-match"
             val resolvedOutcome = when (primaryOutcome) {
                 is RecognitionOutcome.Match -> primaryOutcome
-                RecognitionOutcome.NoMatch -> recognizeFromCardText(jpegBytes, language)
+                RecognitionOutcome.NoMatch -> {
+                    recognitionPath = "ocr-fallback"
+                    recognizeFromCardText(jpegBytes, language)
+                }
                 is RecognitionOutcome.Unavailable -> {
+                    recognitionPath = "image-match-unavailable"
                     recognizeFromCardText(jpegBytes, language).let { fallback ->
-                        if (fallback is RecognitionOutcome.Match) fallback else primaryOutcome
+                        if (fallback is RecognitionOutcome.Match) {
+                            recognitionPath = "ocr-fallback-after-unavailable"
+                            fallback
+                        } else {
+                            primaryOutcome
+                        }
                     }
                 }
             }
@@ -348,6 +396,15 @@ class ScannerViewModel(application: Application) : AndroidViewModel(application)
                             scanSaving = false,
                             statusMessage = "후보를 확인한 뒤 컬렉션에 추가해 주세요",
                             isEndpointConfigured = true,
+                            lastScanDebug = it.scanDebugSnapshotForResult(
+                                language = language,
+                                phase = ScanPhase.MATCHED,
+                                message = "후보를 확인한 뒤 컬렉션에 추가해 주세요",
+                                recognitionPath = recognitionPath,
+                                cropImageUrl = debugCropUrl,
+                                match = prepared.card,
+                                candidates = prepared.candidates,
+                            ),
                         )
                     }
                 }
@@ -355,6 +412,14 @@ class ScannerViewModel(application: Application) : AndroidViewModel(application)
                     it.copy(
                         phase = ScanPhase.WAITING,
                         statusMessage = "카드명이나 번호를 읽지 못했습니다. 잠시 고정해 주세요",
+                        lastScanDebug = it.scanDebugSnapshotForResult(
+                            language = language,
+                            phase = ScanPhase.WAITING,
+                            message = "카드명이나 번호를 읽지 못했습니다. 잠시 고정해 주세요",
+                            recognitionPath = recognitionPath,
+                            cropImageUrl = debugCropUrl,
+                            errorMessage = "no-match",
+                        ),
                     )
                 }
                 is RecognitionOutcome.Unavailable -> mutableState.update {
@@ -363,6 +428,14 @@ class ScannerViewModel(application: Application) : AndroidViewModel(application)
                         statusMessage = resolvedOutcome.message,
                         isEndpointConfigured = BuildConfig.SUPABASE_URL.isNotBlank() &&
                             BuildConfig.SUPABASE_ANON_KEY.isNotBlank(),
+                        lastScanDebug = it.scanDebugSnapshotForResult(
+                            language = language,
+                            phase = ScanPhase.ERROR,
+                            message = resolvedOutcome.message,
+                            recognitionPath = recognitionPath,
+                            cropImageUrl = debugCropUrl,
+                            errorMessage = resolvedOutcome.message,
+                        ),
                     )
                 }
             }
@@ -580,6 +653,17 @@ class ScannerViewModel(application: Application) : AndroidViewModel(application)
                 scanAwaitingConfirmation = true,
                 scanAdded = false,
                 statusMessage = "${candidate.name} 선택됨 · 추가 버튼을 눌러 주세요",
+                lastScanDebug = current.scanDebugSnapshotForResult(
+                    language = current.language,
+                    phase = ScanPhase.MATCHED,
+                    message = "${candidate.name} 선택됨 · 추가 버튼을 눌러 주세요",
+                    recognitionPath = current.lastScanDebug?.recognitionPath
+                        ?.ifBlank { "manual-candidate" }
+                        ?: "manual-candidate",
+                    cropImageUrl = current.lastScanDebug?.cropImageUrl,
+                    match = selected,
+                    candidates = current.candidates,
+                ),
             )
         }
     }
@@ -988,6 +1072,78 @@ class ScannerViewModel(application: Application) : AndroidViewModel(application)
         item.card.language == card.language &&
         item.condition == "NM" &&
         item.finish == "normal"
+
+    private fun buildProbeDebugSnapshot(
+        language: CardLanguage,
+        probe: FrameProbe,
+        phase: ScanPhase,
+        message: String,
+    ): ScanDebugSnapshot = ScanDebugSnapshot(
+        capturedAt = Instant.now().toString(),
+        language = language,
+        phase = phase,
+        statusMessage = message,
+        brightness = probe.brightness,
+        motion = probe.motion,
+        stableFrames = probe.stableFrames,
+        detectionConfidence = probe.detection?.confidence ?: 0.0,
+        cornerSummary = cornerSummary(probe.detection),
+    )
+
+    private fun ScannerUiState.scanDebugSnapshotForResult(
+        language: CardLanguage,
+        phase: ScanPhase,
+        message: String,
+        recognitionPath: String,
+        cropImageUrl: String?,
+        match: RecognizedCard? = null,
+        candidates: List<RecognizedCard> = emptyList(),
+        errorMessage: String = "",
+    ): ScanDebugSnapshot? {
+        if (!scanDebugEnabled) return lastScanDebug
+        return ScanDebugSnapshot(
+            capturedAt = Instant.now().toString(),
+            language = language,
+            phase = phase,
+            statusMessage = message,
+            brightness = probe.brightness,
+            motion = probe.motion,
+            stableFrames = probe.stableFrames,
+            detectionConfidence = probe.detection?.confidence ?: 0.0,
+            cornerSummary = cornerSummary(probe.detection),
+            cropImageUrl = cropImageUrl ?: lastScanDebug?.cropImageUrl,
+            recognizedCardName = match?.name.orEmpty(),
+            recognizedSetName = match?.setName.orEmpty(),
+            recognizedNumber = match?.number.orEmpty(),
+            recognizedConfidence = match?.confidence ?: 0.0,
+            recognitionPath = recognitionPath,
+            errorMessage = errorMessage,
+            candidates = candidates.take(6).map { it.toDebugCandidate(this) },
+        )
+    }
+
+    private fun RecognizedCard.toDebugCandidate(
+        state: ScannerUiState,
+    ): ScanDebugCandidate = ScanDebugCandidate(
+        name = name,
+        setName = setName,
+        number = number,
+        confidence = confidence,
+        source = source,
+        priceSource = priceSource,
+        priceText = marketPrice?.let {
+            "${state.displayCurrency} ${
+                String.format(Locale.US, "%.2f", state.convertedPrice(this@toDebugCandidate))
+            }"
+        }.orEmpty(),
+    )
+
+    private fun cornerSummary(detection: CardDetection?): String {
+        if (detection == null || detection.corners.isEmpty()) return ""
+        return detection.corners.joinToString(" / ") { point ->
+            "${(point.x * 100).roundToInt()},${(point.y * 100).roundToInt()}"
+        }
+    }
 
     private companion object {
         const val MIN_TEXT_MATCH_CONFIDENCE = 0.52

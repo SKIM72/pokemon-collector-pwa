@@ -13,3 +13,14 @@ supabase link --project-ref gyxeddbvebnefasqxyiv
 supabase db push
 supabase functions deploy card-image-match
 ```
+
+## Reference Image Coverage
+
+Japanese scan accuracy depends on the rows in
+`public.card_reference_embeddings`. See
+`docs/japanese-reference-index.md` for the reference-image import workflow and
+`supabase/seed/card_reference_seed_template.csv` for the seed manifest format.
+
+The app can now expose a scan debug panel that shows the latest crop,
+detection confidence, recognition path, and returned candidates. Use that data
+to decide which Japanese cards need additional reference images.

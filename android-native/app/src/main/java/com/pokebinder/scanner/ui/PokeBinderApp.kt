@@ -144,6 +144,8 @@ fun PokeBinderApp(
     onCollectionSortFieldChanged: (CollectionSortField) -> Unit,
     onCollectionSortDirectionToggle: () -> Unit,
     onDisplayCurrencyChanged: (String) -> Unit,
+    onScanDebugToggle: (Boolean) -> Unit,
+    onScanDebugClear: () -> Unit,
     onRefreshCollection: () -> Unit,
     onProfileUpdate: (String) -> Unit,
     onPasswordUpdate: (String, String) -> Unit,
@@ -270,6 +272,8 @@ fun PokeBinderApp(
                 onThemeModeChanged = onThemeModeChanged,
                 onLanguageSelected = onLanguageSelected,
                 onDisplayCurrencyChanged = onDisplayCurrencyChanged,
+                onScanDebugToggle = onScanDebugToggle,
+                onScanDebugClear = onScanDebugClear,
                 onRefreshCollection = onRefreshCollection,
                 onProfileUpdate = onProfileUpdate,
                 onPasswordUpdate = onPasswordUpdate,
@@ -1408,6 +1412,8 @@ private fun SettingsScreen(
     onThemeModeChanged: (ThemeMode) -> Unit,
     onLanguageSelected: (CardLanguage) -> Unit,
     onDisplayCurrencyChanged: (String) -> Unit,
+    onScanDebugToggle: (Boolean) -> Unit,
+    onScanDebugClear: () -> Unit,
     onRefreshCollection: () -> Unit,
     onProfileUpdate: (String) -> Unit,
     onPasswordUpdate: (String, String) -> Unit,
@@ -1524,6 +1530,49 @@ private fun SettingsScreen(
                             onClick = { onLanguageSelected(language) },
                         )
                     }
+                }
+            }
+        }
+        item {
+            SettingsGroup(title = "스캔 디버그") {
+                Text(
+                    text = "인식이 빗나가는 카드의 마지막 크롭, 모서리 신뢰도, 후보 경로를 확인합니다.",
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    fontSize = 12.sp,
+                )
+                Spacer(modifier = Modifier.height(10.dp))
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    SelectChip(
+                        label = if (state.scanDebugEnabled) "디버그 켜짐" else "디버그 꺼짐",
+                        selected = state.scanDebugEnabled,
+                        onClick = { onScanDebugToggle(!state.scanDebugEnabled) },
+                    )
+                    OutlinedButton(
+                        onClick = onScanDebugClear,
+                        enabled = state.lastScanDebug != null,
+                    ) {
+                        Text("기록 지우기")
+                    }
+                }
+                state.lastScanDebug?.let { debug ->
+                    Spacer(modifier = Modifier.height(10.dp))
+                    SettingsRow(
+                        label = "최근 경로",
+                        value = debug.recognitionPath.ifBlank { "대기" },
+                    )
+                    Divider(color = MaterialTheme.colorScheme.surfaceVariant)
+                    SettingsRow(
+                        label = "검출 신뢰도",
+                        value = "${(debug.detectionConfidence * 100).toInt()}%",
+                        valueColor = if (debug.detectionConfidence >= 0.7) {
+                            MaterialTheme.colorScheme.primary
+                        } else {
+                            MaterialTheme.colorScheme.error
+                        },
+                    )
                 }
             }
         }
