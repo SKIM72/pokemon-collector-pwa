@@ -9,6 +9,8 @@ import com.pokebinder.scanner.data.CardRecognitionRepository
 import com.pokebinder.scanner.data.CardScanImageRepository
 import com.pokebinder.scanner.data.EdgeFunctionCardRecognitionRepository
 import com.pokebinder.scanner.data.ExchangeRateRepository
+import com.pokebinder.scanner.data.OfficialJapaneseScanRepository
+import com.pokebinder.scanner.data.RecognitionFusion
 import com.pokebinder.scanner.data.SupabaseAuthRepository
 import com.pokebinder.scanner.data.SupabaseCollectionRepository
 import com.pokebinder.scanner.data.SupabaseSession
@@ -16,6 +18,7 @@ import com.pokebinder.scanner.data.TcgDexRepository
 import com.pokebinder.scanner.model.AuthStatus
 import com.pokebinder.scanner.model.CardDetection
 import com.pokebinder.scanner.model.CardLanguage
+import com.pokebinder.scanner.model.CardTextHints
 import com.pokebinder.scanner.model.CollectionSortField
 import com.pokebinder.scanner.model.FrameProbe
 import com.pokebinder.scanner.model.RecognitionOutcome
@@ -29,6 +32,7 @@ import com.pokebinder.scanner.model.SessionCard
 import com.pokebinder.scanner.model.SortDirection
 import com.pokebinder.scanner.scanner.CardImageEmbedder
 import com.pokebinder.scanner.scanner.CardTextRecognizer
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
@@ -37,6 +41,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.time.Instant
 import java.util.Locale
 import kotlin.math.roundToInt
@@ -45,7 +50,9 @@ class ScannerViewModel(application: Application) : AndroidViewModel(application)
     private val imageEmbedder = CardImageEmbedder(application)
     private val cardTextRecognizer = CardTextRecognizer()
     private val recognitionRepository: CardRecognitionRepository =
-        EdgeFunctionCardRecognitionRepository(imageEmbedder)
+        EdgeFunctionCardRecognitionRepository()
+    private val officialJapaneseScanRepository =
+        OfficialJapaneseScanRepository(imageEmbedder)
     private val authRepository = SupabaseAuthRepository(application)
     private val collectionRepository = SupabaseCollectionRepository()
     private val scanImageRepository = CardScanImageRepository(application)
@@ -427,26 +434,59 @@ class ScannerViewModel(application: Application) : AndroidViewModel(application)
             } else {
                 null
             }
-            val primaryOutcome = recognitionRepository.recognize(jpegBytes, language)
-            var recognitionPath = "image-match"
-            val resolvedOutcome = when (primaryOutcome) {
-                is RecognitionOutcome.Match -> primaryOutcome
-                RecognitionOutcome.NoMatch -> {
-                    recognitionPath = "ocr-fallback"
-                    recognizeFromCardText(jpegBytes, language)
+            mutableState.update {
+                it.copy(
+                    phase = ScanPhase.ANALYZING,
+                    statusMessage = if (language == CardLanguage.JAPANESE) {
+                        "카드명과 일본 공식 이미지를 함께 확인 중..."
+                    } else {
+                        "카드명과 이미지를 함께 확인 중..."
+                    },
+                )
+            }
+            val decision = coroutineScope {
+                val hintsDeferred = async {
+                    runCatching {
+                        cardTextRecognizer.recognize(jpegBytes, language)
+                    }.getOrNull()
                 }
-                is RecognitionOutcome.Unavailable -> {
-                    recognitionPath = "image-match-unavailable"
-                    recognizeFromCardText(jpegBytes, language).let { fallback ->
-                        if (fallback is RecognitionOutcome.Match) {
-                            recognitionPath = "ocr-fallback-after-unavailable"
-                            fallback
-                        } else {
-                            primaryOutcome
+                val fingerprintDeferred = async {
+                    runCatching {
+                        withContext(Dispatchers.Default) {
+                            imageEmbedder.embed(jpegBytes)
                         }
+                    }.getOrNull()
+                }
+                val hints = hintsDeferred.await()
+                val fingerprint = fingerprintDeferred.await()
+                val imageDeferred = async {
+                    fingerprint?.let {
+                        recognitionRepository.recognize(it, language)
+                    } ?: RecognitionOutcome.Unavailable("이미지 특징값 생성에 실패했습니다.")
+                }
+                val textDeferred = async {
+                    hints?.let { recognizeFromCardTextHints(it, language) }
+                        ?: RecognitionOutcome.NoMatch
+                }
+                val officialDeferred = async {
+                    if (
+                        language == CardLanguage.JAPANESE &&
+                        hints != null &&
+                        fingerprint != null
+                    ) {
+                        officialJapaneseScanRepository.recognize(fingerprint, hints)
+                    } else {
+                        RecognitionOutcome.NoMatch
                     }
                 }
+                RecognitionFusion.resolve(
+                    image = imageDeferred.await(),
+                    text = textDeferred.await(),
+                    official = officialDeferred.await(),
+                )
             }
+            val recognitionPath = decision.path
+            val resolvedOutcome = decision.outcome
 
             when (resolvedOutcome) {
                 is RecognitionOutcome.Match -> {
@@ -970,16 +1010,10 @@ class ScannerViewModel(application: Application) : AndroidViewModel(application)
         }
     }
 
-    private suspend fun recognizeFromCardText(
-        jpegBytes: ByteArray,
+    private suspend fun recognizeFromCardTextHints(
+        hints: CardTextHints,
         language: CardLanguage,
     ): RecognitionOutcome {
-        mutableState.update {
-            it.copy(phase = ScanPhase.ANALYZING, statusMessage = "카드명과 번호 확인 중...")
-        }
-        val hints = runCatching {
-            cardTextRecognizer.recognize(jpegBytes, language)
-        }.getOrElse { return RecognitionOutcome.NoMatch }
         val cards = runCatching {
             cardSearchRepository.matchScanText(hints, language)
         }.getOrElse { return RecognitionOutcome.NoMatch }
@@ -995,14 +1029,17 @@ class ScannerViewModel(application: Application) : AndroidViewModel(application)
         val detailedCandidates = outcome.candidates
             .distinctBy { "${it.language.code}:${it.id}" }
             .take(6)
-            .chunked(3)
-            .flatMap { chunk ->
+            .let { candidates ->
                 coroutineScope {
-                    chunk.map { candidate ->
+                    candidates.map { candidate ->
                         async {
-                            runCatching {
-                                cardSearchRepository.fetchCard(candidate)
-                            }.getOrDefault(candidate)
+                            if (candidate.source != "tcgdex") {
+                                candidate
+                            } else {
+                                runCatching {
+                                    cardSearchRepository.fetchCard(candidate)
+                                }.getOrDefault(candidate)
+                            }
                         }
                     }.awaitAll()
                 }

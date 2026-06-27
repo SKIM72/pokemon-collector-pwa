@@ -4,7 +4,7 @@ import com.pokebinder.scanner.BuildConfig
 import com.pokebinder.scanner.model.CardLanguage
 import com.pokebinder.scanner.model.RecognitionOutcome
 import com.pokebinder.scanner.model.RecognizedCard
-import com.pokebinder.scanner.scanner.CardImageEmbedder
+import com.pokebinder.scanner.scanner.CardImageFingerprint
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaType
@@ -16,11 +16,13 @@ import org.json.JSONObject
 import java.util.concurrent.TimeUnit
 
 interface CardRecognitionRepository {
-    suspend fun recognize(jpegBytes: ByteArray, language: CardLanguage): RecognitionOutcome
+    suspend fun recognize(
+        fingerprint: CardImageFingerprint,
+        language: CardLanguage,
+    ): RecognitionOutcome
 }
 
 class EdgeFunctionCardRecognitionRepository(
-    private val imageEmbedder: CardImageEmbedder,
     private val supabaseUrl: String = BuildConfig.SUPABASE_URL,
     private val anonKey: String = BuildConfig.SUPABASE_ANON_KEY,
     private val functionName: String = BuildConfig.CARD_RECOGNITION_FUNCTION,
@@ -31,7 +33,7 @@ class EdgeFunctionCardRecognitionRepository(
 ) : CardRecognitionRepository {
 
     override suspend fun recognize(
-        jpegBytes: ByteArray,
+        fingerprint: CardImageFingerprint,
         language: CardLanguage,
     ): RecognitionOutcome = withContext(Dispatchers.IO) {
         if (supabaseUrl.isBlank() || anonKey.isBlank()) {
@@ -40,12 +42,6 @@ class EdgeFunctionCardRecognitionRepository(
             )
         }
 
-        val fingerprint = runCatching { imageEmbedder.embed(jpegBytes) }
-            .getOrElse { error ->
-                return@withContext RecognitionOutcome.Unavailable(
-                    error.message ?: "이미지 특징값 생성에 실패했습니다.",
-                )
-            }
         val payload = JSONObject()
             .put("language", language.code)
             .put("embedding", JSONArray(fingerprint.embedding.toList()))
