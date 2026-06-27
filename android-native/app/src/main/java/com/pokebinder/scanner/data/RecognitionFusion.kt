@@ -15,6 +15,8 @@ object RecognitionFusion {
     private const val MIN_TEXT_CONFIDENCE = 0.52
     private const val STRONG_IMAGE_CONFIDENCE = 0.78
     private const val MIN_IMAGE_CONFIDENCE = 0.68
+    private const val MIN_OFFICIAL_INDEX_CONFIDENCE = 0.53
+    private const val MIN_OFFICIAL_INDEX_MARGIN = 0.025
 
     fun resolve(
         image: RecognitionOutcome,
@@ -34,6 +36,15 @@ object RecognitionFusion {
                 textMatch,
                 imageMatch,
                 path = "official-ja",
+            )
+        }
+
+        if (imageMatch != null && isConfidentOfficialIndexMatch(imageMatch)) {
+            return decision(
+                imageMatch.card,
+                imageMatch,
+                textMatch,
+                path = "official-index",
             )
         }
 
@@ -100,6 +111,23 @@ object RecognitionFusion {
 
     private fun cardKey(card: RecognizedCard): String =
         "${card.source}:${card.language.code}:${card.id}"
+
+    private fun isConfidentOfficialIndexMatch(
+        match: RecognitionOutcome.Match,
+    ): Boolean {
+        if (
+            match.card.source != "pokemon-card-official" ||
+            match.card.confidence < MIN_OFFICIAL_INDEX_CONFIDENCE
+        ) {
+            return false
+        }
+        val runnerUp = match.candidates
+            .asSequence()
+            .filter { cardKey(it) != cardKey(match.card) }
+            .maxOfOrNull(RecognizedCard::confidence)
+            ?: 0.0
+        return match.card.confidence - runnerUp >= MIN_OFFICIAL_INDEX_MARGIN
+    }
 
     private fun normalizeName(value: String): String = value
         .lowercase(Locale.ROOT)

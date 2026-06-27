@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Smoke-test the deployed card-image-match function with a TCGdex card."""
+"""Smoke-test card-image-match with a catalog card or a camera image."""
 
 from __future__ import annotations
 
@@ -24,7 +24,11 @@ from index_tcgdex_cards import (
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("--language", choices=("ja", "ko", "en"), default="ja")
-    parser.add_argument("--card-id", required=True)
+    source = parser.add_mutually_exclusive_group(required=True)
+    source.add_argument("--card-id")
+    source.add_argument("--image")
+    parser.add_argument("--expected-id")
+    parser.add_argument("--min-similarity", type=float, default=0.55)
     parser.add_argument("--model", required=True)
     parser.add_argument("--simulate-camera", action="store_true")
     return parser.parse_args()
@@ -38,9 +42,12 @@ def main() -> int:
         print("SUPABASE_URL and SUPABASE_ANON_KEY are required.", file=sys.stderr)
         return 2
 
-    card = fetch_json(f"{TCGDEX_API}/{args.language}/cards/{args.card_id}")
-    image_url = image_url_for(card["image"])
-    image = fetch_image(image_url)
+    if args.image:
+        image = Image.open(args.image).convert("RGB")
+    else:
+        card = fetch_json(f"{TCGDEX_API}/{args.language}/cards/{args.card_id}")
+        image_url = image_url_for(card["image"])
+        image = fetch_image(image_url)
     if args.simulate_camera:
         image = simulate_camera(image)
 
@@ -64,7 +71,7 @@ def main() -> int:
             "embedding": embedding,
             "perceptualHash": difference_hash(image),
             "matchCount": 5,
-            "minSimilarity": 0.55,
+            "minSimilarity": args.min_similarity,
         },
         timeout=45,
     )
@@ -81,7 +88,8 @@ def main() -> int:
             f"{candidate.get('confidence', 0):.4f}",
         )
 
-    return 0 if candidates[0]["id"] == args.card_id else 4
+    expected_id = args.expected_id or args.card_id
+    return 0 if not expected_id or candidates[0]["id"] == expected_id else 4
 
 
 def simulate_camera(image):

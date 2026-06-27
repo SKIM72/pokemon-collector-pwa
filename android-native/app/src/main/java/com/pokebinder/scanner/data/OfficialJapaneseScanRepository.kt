@@ -38,7 +38,7 @@ class OfficialJapaneseScanRepository(
             ): Boolean = size > MAX_EMBEDDING_CACHE
         },
     )
-    private val yuyuTeiPriceRepository = YuyuTeiPriceRepository(client)
+    private val metadataFallback = CardMetadataFallbackRepository(client)
 
     suspend fun recognize(
         query: CardImageFingerprint,
@@ -165,7 +165,7 @@ class OfficialJapaneseScanRepository(
         val confidence = (
             NAME_BASE_SCORE + similarity.coerceIn(0.0, 1.0) * IMAGE_SCORE_WEIGHT + numberBonus
             ).coerceIn(0.0, 0.98)
-        return yuyuTeiPriceRepository.enrich(
+        return metadataFallback.enrich(
             RecognizedCard(
                 id = id,
                 name = name,
@@ -193,8 +193,7 @@ class OfficialJapaneseScanRepository(
         return client.newCall(request).execute().use { response ->
             if (!response.isSuccessful) return@use ""
             OFFICIAL_NUMBER_REGEX.find(response.body?.string().orEmpty())
-                ?.groupValues
-                ?.getOrNull(1)
+                ?.let { match -> "${match.groupValues[1]}/${match.groupValues[2]}" }
                 .orEmpty()
         }
     }
@@ -229,7 +228,9 @@ class OfficialJapaneseScanRepository(
         const val IMAGE_SCORE_WEIGHT = 0.62
         const val NUMBER_BONUS = 0.08
         const val MIN_CONFIDENCE = 0.60
-        val OFFICIAL_NUMBER_REGEX = Regex("""&nbsp;\s*(\d{1,4})\s*&nbsp;\s*/""")
+        val OFFICIAL_NUMBER_REGEX = Regex(
+            """&nbsp;\s*(\d{1,4})\s*&nbsp;\s*/\s*&nbsp;\s*(\d{1,4})""",
+        )
 
         fun cleanName(value: String): String = value
             .replace(Regex("""(?i)\s*HP\s*\d{1,3}.*$"""), "")

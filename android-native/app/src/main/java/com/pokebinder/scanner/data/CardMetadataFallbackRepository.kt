@@ -16,17 +16,31 @@ class CardMetadataFallbackRepository(
     private val officialJapaneseCards = ConcurrentHashMap<String, List<OfficialJapaneseCard>>()
     private val officialJapaneseDetails = ConcurrentHashMap<String, String>()
     private val englishCards = ConcurrentHashMap<String, List<JSONObject>>()
+    private val cardRushPriceRepository = CardRushPriceRepository(client)
     private val yuyuTeiPriceRepository = YuyuTeiPriceRepository(client)
 
     fun enrich(card: RecognizedCard): RecognizedCard {
-        val providerEnriched = when (card.language) {
-            CardLanguage.JAPANESE -> yuyuTeiPriceRepository.enrich(
-                addOfficialJapaneseImage(card),
+        val sourceCard = if (card.priceSource == "estimated-rarity") {
+            card.copy(
+                marketPrice = null,
+                priceSource = "price-unavailable",
             )
-            CardLanguage.ENGLISH -> addPokemonTcgMetadata(card)
-            CardLanguage.KOREAN -> card
+        } else {
+            card
         }
-        return addEstimatedPrice(providerEnriched)
+        return when (sourceCard.language) {
+            CardLanguage.JAPANESE -> {
+                val withImage = addOfficialJapaneseImage(sourceCard)
+                val withCardRush = cardRushPriceRepository.enrich(withImage)
+                if (withCardRush.marketPrice == null) {
+                    yuyuTeiPriceRepository.enrich(withCardRush)
+                } else {
+                    withCardRush
+                }
+            }
+            CardLanguage.ENGLISH -> addPokemonTcgMetadata(sourceCard)
+            CardLanguage.KOREAN -> sourceCard
+        }
     }
 
     private fun addOfficialJapaneseImage(card: RecognizedCard): RecognizedCard {
@@ -108,7 +122,9 @@ class CardMetadataFallbackRepository(
         return client.newCall(request).execute().use { response ->
             if (!response.isSuccessful) return@use ""
             val html = response.body?.string().orEmpty()
-            OFFICIAL_NUMBER_REGEX.find(html)?.groupValues?.getOrNull(1).orEmpty()
+            OFFICIAL_NUMBER_REGEX.find(html)?.let { match ->
+                "${match.groupValues[1]}/${match.groupValues[2]}"
+            }.orEmpty()
         }
     }
 
@@ -223,35 +239,6 @@ class CardMetadataFallbackRepository(
         }
     }
 
-    private fun addEstimatedPrice(card: RecognizedCard): RecognizedCard {
-        if (card.marketPrice != null) return card
-        val rarity = normalized(card.rarity)
-        val premiumName = normalized(card.name)
-        val tier = when {
-            "specialillustration" in rarity || "sar" in rarity -> 5
-            "hyperrare" in rarity || "ultrarare" in rarity || "ur" == rarity -> 4
-            "superrare" in rarity || "art rare" in rarity || "sr" == rarity -> 3
-            "doublerare" in rarity || "ex" in premiumName ||
-                "vstar" in premiumName || premiumName.endsWith("v") -> 2
-            "rare" in rarity -> 1
-            else -> 0
-        }
-        val estimate = when (card.language) {
-            CardLanguage.JAPANESE -> listOf(30.0, 100.0, 300.0, 1_200.0, 2_500.0, 6_000.0)[tier]
-            CardLanguage.KOREAN -> listOf(300.0, 1_000.0, 3_000.0, 12_000.0, 25_000.0, 60_000.0)[tier]
-            CardLanguage.ENGLISH -> listOf(0.25, 0.75, 2.0, 8.0, 18.0, 45.0)[tier]
-        }
-        return card.copy(
-            marketPrice = estimate,
-            currency = when (card.language) {
-                CardLanguage.JAPANESE -> "JPY"
-                CardLanguage.KOREAN -> "KRW"
-                CardLanguage.ENGLISH -> "USD"
-            },
-            priceSource = "estimated-rarity",
-        )
-    }
-
     private data class OfficialJapaneseCard(
         val cardId: String,
         val name: String,
@@ -269,7 +256,9 @@ class CardMetadataFallbackRepository(
         const val JAPANESE_CARD_SITE = "https://www.pokemon-card.com"
         const val POKEMON_TCG_API = "https://api.pokemontcg.io"
         const val USER_AGENT = "PokeBinder/0.9 (personal collection app)"
-        val OFFICIAL_NUMBER_REGEX = Regex("""&nbsp;\s*(\d{1,4})\s*&nbsp;\s*/""")
+        val OFFICIAL_NUMBER_REGEX = Regex(
+            """&nbsp;\s*(\d{1,4})\s*&nbsp;\s*/\s*&nbsp;\s*(\d{1,4})""",
+        )
 
         fun normalized(value: String): String = value
             .lowercase(Locale.ROOT)

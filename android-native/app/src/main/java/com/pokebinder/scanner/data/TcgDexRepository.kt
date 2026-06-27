@@ -26,6 +26,11 @@ class TcgDexRepository(
     private val setReleaseDates = ConcurrentHashMap<String, String>()
     private val metadataFallback = CardMetadataFallbackRepository(client)
 
+    suspend fun enrich(card: RecognizedCard): RecognizedCard =
+        withContext(Dispatchers.IO) {
+            metadataFallback.enrich(card)
+        }
+
     suspend fun searchAllLanguages(query: String): List<RecognizedCard> =
         withContext(Dispatchers.IO) {
             val summaries = coroutineScope {

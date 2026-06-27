@@ -41,6 +41,39 @@ class RecognitionFusionTest {
     }
 
     @Test
+    fun officialIndexMatchUsesScoreMarginWithoutOcr() {
+        val selected = card(
+            id = "50032",
+            name = "ピカチュウex",
+            confidence = 0.5629,
+            source = "pokemon-card-official",
+        )
+        val runnerUp = card("scyther", "ストライク", 0.5205)
+        val image = RecognitionOutcome.Match(selected, listOf(selected, runnerUp))
+
+        val decision = RecognitionFusion.resolve(image, RecognitionOutcome.NoMatch)
+
+        assertEquals("official-index", decision.path)
+        assertEquals("50032", (decision.outcome as RecognitionOutcome.Match).card.id)
+    }
+
+    @Test
+    fun officialIndexMatchWithNarrowMarginIsRejected() {
+        val selected = card(
+            id = "50032",
+            name = "ピカチュウex",
+            confidence = 0.55,
+            source = "pokemon-card-official",
+        )
+        val runnerUp = card("other", "別カード", 0.54)
+        val image = RecognitionOutcome.Match(selected, listOf(selected, runnerUp))
+
+        val decision = RecognitionFusion.resolve(image, RecognitionOutcome.NoMatch)
+
+        assertEquals("no-confident-match", decision.path)
+    }
+
+    @Test
     fun weakImageOnlyResultIsRejected() {
         val decision = RecognitionFusion.resolve(
             image = match(card("wrong", "ストライク", 0.58)),

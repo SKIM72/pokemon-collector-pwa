@@ -47,7 +47,7 @@ class EdgeFunctionCardRecognitionRepository(
             .put("embedding", JSONArray(fingerprint.embedding.toList()))
             .put("perceptualHash", fingerprint.perceptualHash)
             .put("matchCount", 5)
-            .put("minSimilarity", 0.55)
+            .put("minSimilarity", 0.48)
 
         val request = Request.Builder()
             .url("${supabaseUrl.trimEnd('/')}/functions/v1/$functionName")

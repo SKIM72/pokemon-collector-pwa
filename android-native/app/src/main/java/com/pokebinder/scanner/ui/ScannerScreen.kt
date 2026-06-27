@@ -910,6 +910,7 @@ private fun PriceBadge(
 }
 
 private fun priceSourceLabel(source: String): String = when (source) {
+    "cardrush" -> "CardRush"
     "yuyu-tei" -> "遊々亭"
     "estimated-rarity" -> "추정가"
     "pokemon-tcg-api" -> "TCGPlayer"

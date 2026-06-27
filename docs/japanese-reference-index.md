@@ -11,7 +11,7 @@ TCGdex is the best free source we have found for broad Japanese Pokemon card
 metadata, but image and market coverage can still be incomplete. The reliable
 long-term path is to keep our own Japanese reference index:
 
-1. Collect card metadata from free sources such as TCGdex.
+1. Collect Japanese card metadata and images from the Pokemon Card Japan catalog.
 2. Keep source, image, and market URLs for auditability.
 3. Generate image embeddings with the same on-device model used by the scanner.
 4. Upsert those embeddings into Supabase.
@@ -19,7 +19,8 @@ long-term path is to keep our own Japanese reference index:
 
 ## Seed CSV
 
-Use `supabase/seed/card_reference_seed_template.csv` as the hand-checkable
+Use `scripts/index_pokemon_jp_cards.py` for the official Japanese catalog and
+`supabase/seed/card_reference_seed_template.csv` as the hand-checkable
 manifest for Japanese cards that need stronger scan coverage. One row should map
 to one printed card image.
 
@@ -58,6 +59,31 @@ The safest import flow is intentionally two-step:
 Do not run neural-network inference inside Supabase Edge Functions for the main
 path. Keeping inference on the device avoids camera image uploads and keeps the
 free-tier Edge Function workload small.
+
+## Official Japanese Import
+
+The importer can index a named group first:
+
+```bash
+python scripts/index_pokemon_jp_cards.py \
+  --model android-native/app/src/main/assets/mobilenet_v3_small.tflite \
+  --query 'ピカチュウex' \
+  --limit 30
+```
+
+Or process catalog pages incrementally:
+
+```bash
+python scripts/index_pokemon_jp_cards.py \
+  --model android-native/app/src/main/assets/mobilenet_v3_small.tflite \
+  --start-page 1 \
+  --pages 10 \
+  --limit 390
+```
+
+The production command requires `SUPABASE_URL` and
+`SUPABASE_SERVICE_ROLE_KEY`. Never put the service-role key in the Android app
+or commit it to Git.
 
 ## Next Implementation Step
 

@@ -930,8 +930,11 @@ class ScannerViewModel(application: Application) : AndroidViewModel(application)
     ) {
         val targets = cards.filter { item ->
             val needsJapaneseMarket = item.card.language == CardLanguage.JAPANESE &&
-                item.card.priceSource != "yuyu-tei"
-            item.card.source == "tcgdex" &&
+                item.card.priceSource !in setOf("cardrush", "yuyu-tei")
+            (
+                item.card.source in setOf("tcgdex", "pokemon-card-official") ||
+                    item.card.priceSource == "estimated-rarity"
+                ) &&
                 (
                     refreshAll ||
                         needsJapaneseMarket ||
@@ -957,7 +960,11 @@ class ScannerViewModel(application: Application) : AndroidViewModel(application)
                 chunk.map { item ->
                     async {
                         item to runCatching {
-                            cardSearchRepository.fetchCard(item.card)
+                            if (item.card.source == "tcgdex") {
+                                cardSearchRepository.fetchCard(item.card)
+                            } else {
+                                cardSearchRepository.enrich(item.card)
+                            }
                         }.getOrDefault(item.card)
                     }
                 }.awaitAll()
@@ -1034,7 +1041,7 @@ class ScannerViewModel(application: Application) : AndroidViewModel(application)
                     candidates.map { candidate ->
                         async {
                             if (candidate.source != "tcgdex") {
-                                candidate
+                                cardSearchRepository.enrich(candidate)
                             } else {
                                 runCatching {
                                     cardSearchRepository.fetchCard(candidate)
